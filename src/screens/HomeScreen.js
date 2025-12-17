@@ -1,12 +1,13 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { router } from 'expo-router';
-import { Plus, RefreshCw, Trash2, TrendingUp } from 'lucide-react-native';
+import { Plus, Settings, TrendingUp } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Dimensions,
+    RefreshControl,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -28,7 +29,9 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const formatMoney = (val, cur = 'EUR') => {
     const v = Number(val || 0);
-    return `${cur} ${v.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+    const symbols = { 'EUR': '€', 'USD': '$', 'GBP': '£' };
+    const symbol = symbols[cur] || cur;
+    return `${symbol} ${v.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
 };
 
 export default function HomeScreen() {
@@ -48,7 +51,8 @@ export default function HomeScreen() {
     );
 
     // --- CACHING HELPERS ---
-    const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+    const CACHE_MAJOR = 10 * 60 * 1000; // 10 mins for > 10 worth
+    const CACHE_MINOR = 60 * 60 * 1000; // 1 hour for <= 10 worth
 
     const saveCache = async (p, cData, d, r) => {
         try {
@@ -56,8 +60,7 @@ export default function HomeScreen() {
             await setMeta('cached_chart_data', JSON.stringify(cData));
             await setMeta('cached_delta', JSON.stringify(d));
             await setMeta('cached_range', r);
-            await setMeta('cached_timestamp', Date.now().toString());
-            // console.log('[DEBUG] Cache saved');
+            await setMeta('cached_custom_ts', Date.now().toString()); // Use custom key to avoid confusion
         } catch (e) {
             console.error('[Cache] Save Error', e);
         }
@@ -69,22 +72,79 @@ export default function HomeScreen() {
             const cStr = await getMeta('cached_chart_data');
             const dStr = await getMeta('cached_delta');
             const rStr = await getMeta('cached_range');
-            const tsStr = await getMeta('cached_timestamp');
+            const tsStr = await getMeta('cached_custom_ts');
 
             if (pStr && cStr) {
-                const data = {
+                return {
                     portfolio: JSON.parse(pStr),
                     chartData: JSON.parse(cStr),
                     delta: dStr ? JSON.parse(dStr) : { val: 0, pct: 0 },
                     range: rStr || '1D',
                     timestamp: tsStr ? Number(tsStr) : 0
                 };
-                return data;
             }
         } catch (e) {
             console.error('[Cache] Load Error', e);
         }
         return null;
+    };
+
+    // Helper: Smart Fetch
+    const smartFetchPortfolio = async (holdingsMap, cachedPortfolio, savedTimestamp) => {
+        const now = Date.now();
+        const symbols = Object.keys(holdingsMap);
+        const toFetch = [];
+        const kept = [];
+
+        if (!cachedPortfolio || !savedTimestamp) {
+            // No cache? Fetch all.
+            toFetch.push(...symbols);
+        } else {
+            const cacheMap = new Map(cachedPortfolio.map(i => [i.symbol, i]));
+
+            for (const sym of symbols) {
+                const cachedItem = cacheMap.get(sym);
+                if (!cachedItem) {
+                    // New symbol not in cache
+                    toFetch.push(sym);
+                } else {
+                    const val = cachedItem.value;
+                    const age = now - savedTimestamp;
+
+                    // Logic: If val > 10, expire in 10 mins. If val <= 10, expire in 1h.
+                    const threshold = val > 10 ? CACHE_MAJOR : CACHE_MINOR;
+
+                    if (age > threshold) {
+                        toFetch.push(sym);
+                    } else {
+                        // Keep cached item but update quantity if changed in DB (holdingsMap is source of truth for qty)
+                        // If qty changed, we SHOULD fetch to get accurate value? 
+                        // Or just update value = newQty * oldPrice?
+                        // Let's safe update: if qty diff, fetch.
+                        if (Math.abs(cachedItem.quantity - holdingsMap[sym]) > 0.00000001) {
+                            toFetch.push(sym);
+                        } else {
+                            kept.push(cachedItem);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (toFetch.length === 0) return kept;
+
+        console.log(`[SmartFetch] Fetching ${toFetch.length} items (Cached: ${kept.length})`);
+
+        // Fetch only needed subset
+        const subsetMap = {};
+        toFetch.forEach(s => subsetMap[s] = holdingsMap[s]);
+
+        const newItems = await fetchPortfolioPrices(subsetMap, currency);
+
+        // Merge
+        const merged = [...kept, ...newItems];
+        merged.sort((a, b) => b.value - a.value);
+        return merged;
     };
 
     // Compute History with dynamic range support
@@ -94,7 +154,6 @@ export default function HomeScreen() {
             const allTxns = await initDb().then(() => import('../db').then(m => m.getAllTransactions()));
 
             if (!allTxns.length) {
-                // Return flat 0 line if no transactions
                 const now = Date.now();
                 setChartData([{ timestamp: now - 86400000, value: 0 }, { timestamp: now, value: 0 }]);
                 setChartColor('#94a3b8');
@@ -103,89 +162,82 @@ export default function HomeScreen() {
                 return;
             }
 
-            const assets = Object.keys(currentHoldings);
-            if (!assets.length && !allTxns.length) {
-                setGraphLoading(false);
-                return;
+            // FILTER: Only fetch history for assets with value > 10
+            // We use currentPortfolio to determine value.
+            const significantSymbols = new Set();
+            if (currentPortfolio) {
+                currentPortfolio.forEach(p => {
+                    if (p.value > 10) significantSymbols.add(p.symbol);
+                });
             }
+            // If no significant symbols, map might be empty, resulting in flat line.
+            // But this is what user requested.
 
-            // --- 1. DETERMINE TIMELINE PARAMETERS ---
+            // --- 1. PARAMS ---
             let rLimit = 30;
             let rTimeframe = 'day';
-
-            // Map Range to API params
             switch (selectedRange) {
                 case '1H': rTimeframe = 'minute'; rLimit = 60; break;
-                case '1D': rTimeframe = 'minute'; rLimit = 1440; break; // Full day resolution
+                case '1D': rTimeframe = 'minute'; rLimit = 1440; break;
                 case '1W': rTimeframe = 'hour'; rLimit = 168; break;
                 case '1M': rTimeframe = 'day'; rLimit = 30; break;
                 case '1Y': rTimeframe = 'day'; rLimit = 365; break;
-                case 'ALL': rTimeframe = 'day'; rLimit = 1980; break; // Max safe limit
+                case 'ALL': rTimeframe = 'day'; rLimit = 1980; break;
                 default: rTimeframe = 'day'; rLimit = 90;
             }
 
-            let stepSeconds = 86400; // day
+            let stepSeconds = 86400;
             if (rTimeframe === 'hour') stepSeconds = 3600;
             if (rTimeframe === 'minute') stepSeconds = 60;
 
-            // --- 2. GENERATE TIME POINTS ---
-            // We want a grid aligned to API (Step) BUT ending at NOW to capture latest movement.
+            // --- 2. TIME POINTS ---
             const nowMs = Date.now();
             const nowSec = Math.floor(nowMs / 1000);
-
-            // Grid-aligned "Latest" point
             const gridNow = Math.floor(nowSec / stepSeconds) * stepSeconds;
 
             let timePoints = [];
-            // Generate history points backwards from gridNow
-            let fetchLimit = rLimit;
-            // Special case for 1D: we want full day coverage
-            if (selectedRange === '1D') fetchLimit = 1440;
-
+            let fetchLimit = selectedRange === '1D' ? 1440 : rLimit;
             for (let i = fetchLimit; i >= 0; i--) {
                 const ts = gridNow - (i * stepSeconds);
                 if (ts <= nowSec) timePoints.push(ts);
             }
+            if (nowSec - timePoints[timePoints.length - 1] > 1) timePoints.push(nowSec);
 
-            // Crucial: Add exact NOW point if it's significantly different from gridNow
-            // This ensures instant updates (buy now -> graph jumps now)
-            if (nowSec - timePoints[timePoints.length - 1] > 1) {
-                timePoints.push(nowSec);
-            }
-
-            // --- 3. FETCH HISTORY FOR ALL INVOLVED ASSETS ---
+            // --- 3. FETCH HISTORY (Significant Only) ---
             const { fetchCandles } = await import('../cryptoCompare');
-            // Get all symbols ever involved (even if 0 now) or at least current holdings
-            const uniqueSymbols = new Set([...allTxns.map(t => t.symbol), ...Object.keys(currentHoldings)]);
-
-            // Map: Symbol -> Array of { time, close }
             const historyMap = {};
-
-            // Fetch extra buffer to ensure coverage
             const fetchCount = rLimit + 20;
 
-            await Promise.all(
-                Array.from(uniqueSymbols).map(async (sym) => {
-                    // Optimized: Only fetch if we suspect non-zero holding.
-                    // But we don't know timeline alloc yet. Fetch all involved is safest.
-                    try {
-                        const data = await fetchCandles(sym, savedCurrency || currency, rTimeframe, fetchCount);
-                        // Sort just in case (API usually returns sorted)
-                        if (data && data.length) data.sort((a, b) => a.time - b.time);
-                        historyMap[sym] = data || [];
-                    } catch (err) {
-                        console.warn(`[History] Failed to fetch for ${sym}`, err);
-                        historyMap[sym] = [];
-                    }
-                })
-            );
+            // Only fetch for significant symbols found in current portfolio
+            // AND maybe symbols that are not in holding BUT were significant?
+            // User said "dont even consider them" (meaning low value ones).
+            // So strictly use significantSymbols.
+            const symbolsToFetch = Array.from(significantSymbols);
 
-            // --- 4. SIMULATE PORTFOLIO VALUE AT EACH POINT ---
+            if (symbolsToFetch.length > 0) {
+                await Promise.all(
+                    symbolsToFetch.map(async (sym) => {
+                        try {
+                            const data = await fetchCandles(sym, savedCurrency || currency, rTimeframe, fetchCount);
+                            if (data && data.length) data.sort((a, b) => a.time - b.time);
+                            historyMap[sym] = data || [];
+                        } catch (err) {
+                            console.warn(`[History] Failed to fetch for ${sym}`, err);
+                            historyMap[sym] = [];
+                        }
+                    })
+                );
+            }
+
+            // --- 4. SIMULATE ---
             let graphPoints = timePoints.map(tPoint => {
-                // A. Calculate Holdings at tPoint
-                // Sum all txs happening BEFORE OR AT tPoint
-                const relevantTxns = allTxns.filter(t => new Date(t.dateISO || t.date_iso).getTime() / 1000 <= tPoint);
+                // Sum txns
+                // Note: We still sum ALL txns to get quantities.
+                // But we only have PRICE history for 'significant' ones.
+                // So insignificant ones will just valid at 0 price (missing history).
+                // Effectively executing "dont consider them".
 
+                const relevantTxns = allTxns.filter(t => new Date(t.dateISO || t.date_iso).getTime() / 1000 <= tPoint);
                 const h = {};
                 for (const t of relevantTxns) {
                     if (!h[t.symbol]) h[t.symbol] = 0;
@@ -193,63 +245,49 @@ export default function HomeScreen() {
                     if (['SELL', 'WITHDRAW', 'SEND'].includes(t.way)) h[t.symbol] -= t.amount;
                 }
 
-                // B. Calculate Value using History
                 let val = 0;
                 for (const [sym, qty] of Object.entries(h)) {
-                    if (qty <= 0.00000001) continue; // Skip dust
+                    if (qty <= 0.00000001) continue;
 
+                    // Only calculates value if we have history (i.e. it is significant NOW)
                     const hist = historyMap[sym];
                     let price = 0;
-
                     if (hist && hist.length > 0) {
-                        // Find closest candle
-                        // Simple robust logic: Find candle with time <= tPoint + small_tolerance
                         const candidates = hist.filter(c => c.time <= tPoint + (stepSeconds / 2));
-
-                        if (candidates.length > 0) {
-                            price = candidates[candidates.length - 1].close;
-                        }
+                        if (candidates.length > 0) price = candidates[candidates.length - 1].close;
                     }
 
-                    // Fallback: If no history found (gap or very new coin not in hist yet)
-                    // If tPoint is very recent (Last 24h), try to use currentPortfolio Live Price
+                    // Fallback to live price IF it is the very recent point AND we have it in currentPortfolio
+                    // But only if we have it in significant list?
                     if (price === 0 && Math.abs(nowSec - tPoint) < 86400) {
                         const currP = currentPortfolio?.find(c => c.symbol === sym);
-                        if (currP) price = currP.price;
+                        // If currP exists it implies we fetched it.
+                        // Check if significant? 
+                        if (currP && currP.value > 10) price = currP.price;
                     }
 
                     val += qty * price;
                 }
-
                 return { timestamp: tPoint * 1000, value: val };
             });
 
-            // --- 5. POST-PROCESSING ---
-
-            // Trim leading zeros (if graph is mostly empty)
+            // --- 5. POST-PROCESS ---
             const firstActiveIndex = graphPoints.findIndex(p => p.value > 0.0001);
-            if (firstActiveIndex > 0) {
-                // For long ranges, trim. For 1H/1D, maybe keep to show "You started just now"
-                if (['1M', '1Y', 'ALL'].includes(selectedRange)) {
-                    graphPoints = graphPoints.slice(firstActiveIndex);
-                }
+            if (firstActiveIndex > 0 && ['1M', '1Y', 'ALL'].includes(selectedRange)) {
+                graphPoints = graphPoints.slice(firstActiveIndex);
             }
 
-            // Downsample for performance if too many points
             if (graphPoints.length > 100) {
                 const step = Math.ceil(graphPoints.length / 80);
                 graphPoints = graphPoints.filter((_, i) => i % step === 0 || i === graphPoints.length - 1);
             }
 
-            // Compute Delta
             let newDelta = { val: 0, pct: 0 };
             if (graphPoints.length > 0) {
                 const startVal = graphPoints[0].value;
                 const endVal = graphPoints[graphPoints.length - 1].value;
                 const diff = endVal - startVal;
-                // Avoid division by zero
                 const pct = startVal > 0.0001 ? (diff / startVal) * 100 : 0;
-
                 newDelta = { val: diff, pct };
                 setDelta(newDelta);
                 setChartColor(diff >= 0 ? '#22c55e' : '#ef4444');
@@ -257,6 +295,70 @@ export default function HomeScreen() {
                 setDelta({ val: 0, pct: 0 });
                 setChartColor('#94a3b8');
             }
+
+            // --- 6. CALCULATE INDIVIDUAL COIN PERFORMANCES ---
+            // Helper function to centralize logic per user request
+            const getAssetPerformance = (item, history, range, startTime) => {
+                const { price, quantity, change24h } = item;
+
+                // STRATEGY 1: API Data (Best for 1D)
+                // For 1D, the API's 'change24h' is the industry standard and most robust.
+                // Calculating it from minute-candles can be prone to gaps or misalignment.
+                if (range === '1D') {
+                    // Back-calculate value delta from %
+                    const startPrice = price / (1 + (change24h / 100));
+                    const valDelta = (price - startPrice) * quantity;
+                    return { val: valDelta, pct: change24h };
+                }
+
+                // STRATEGY 2: Historical Data (Best for 1H, 1W, 1M, 1Y)
+                if (!history || history.length === 0) {
+                    return { val: 0, pct: 0 };
+                }
+
+                let effectiveStartPrice = 0;
+
+                // Robust Start Price Scan (ignore zeroes)
+                const startIndex = history.findIndex(c => c.time >= startTime);
+                if (startIndex !== -1) {
+                    for (let i = startIndex; i < history.length; i++) {
+                        if (history[i].open > 0) {
+                            effectiveStartPrice = history[i].open;
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback scan
+                if (effectiveStartPrice === 0) {
+                    const firstValid = history.find(c => c.open > 0);
+                    if (firstValid) effectiveStartPrice = firstValid.open;
+                }
+
+                if (effectiveStartPrice > 0) {
+                    const diff = price - effectiveStartPrice;
+                    const pct = (diff / effectiveStartPrice) * 100;
+                    const val = diff * quantity;
+                    return { val, pct };
+                }
+
+                return { val: 0, pct: 0 };
+            };
+
+            const newCoinDeltas = {};
+            const rangeStart = timePoints[0];
+
+            if (currentPortfolio) {
+                currentPortfolio.forEach(item => {
+                    newCoinDeltas[item.symbol] = getAssetPerformance(
+                        item,
+                        historyMap[item.symbol],
+                        selectedRange,
+                        rangeStart
+                    );
+                });
+            }
+            setCoinDeltas(newCoinDeltas);
 
             setChartData(graphPoints);
             // Save successful state
@@ -285,44 +387,26 @@ export default function HomeScreen() {
                 const savedCurrency = await getMeta('currency');
                 if (savedCurrency) setCurrency(savedCurrency);
 
-                const cached = await loadCache();
-                const isFresh = cached && (Date.now() - cached.timestamp < CACHE_DURATION);
-
-                // Use cache if fresh
-                if (isFresh) {
-                    console.log('[App] Using fresh cache');
-                    setPortfolio(cached.portfolio);
-                    setChartData(cached.chartData);
-                    setDelta(cached.delta);
-                    setRange(cached.range);
-                    setBooting(false);
-                    return;
-                }
-
-                // Otherwise, fetch new
                 const holdings = await getHoldingsMap();
-                if (Object.keys(holdings).length > 0) {
-                    const p = await fetchPortfolioPrices(holdings, savedCurrency || currency);
-                    setPortfolio(p);
-                    computeHistory(holdings, p, savedCurrency || currency, '1D');
-                } else {
-                    // If fetch fails (or no holdings), and we have STALE cache, use it as fallback?
-                    // Actually, if we are here, it means we have no holdings OR we want to fetch new data.
-                    // If fetch fails, the catch block handles fallback.
+                const cached = await loadCache();
 
-                    // But if no holdings, check if we have stale cache to show?
-                    // Usually if no holdings map, we are genuinely empty or just imported.
-                    if (cached) {
-                        // Fallback to cache even if stale if we have nothing else?
-                        setPortfolio(cached.portfolio);
-                        setChartData(cached.chartData);
-                        setDelta(cached.delta);
-                        setRange(cached.range);
-                    } else {
-                        setPortfolio(null);
-                        setChartData([]);
-                    }
-                }
+                // Boot: Try smart fetch (which respects timeouts)
+                // If smartFetch returns, it handles cache logic internally (returns stored items if fresh)
+                const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp);
+
+                setPortfolio(p);
+                // Compute history (will default to 1D, and might just load cache if available? 
+                // computeHistory will re-calc. We could optimize this too but calculating history is cheap/free, fetching is expensive.
+                // computeHistory does fetching.
+
+                // Optimization: If p hasn't changed from cached.portfolio, AND cached.chartData exists...
+                // But p might be partial new.
+                // Let's just run computeHistory. It will filter significant symbols.
+                // If significant symbols haven't changed, maybe we can cache history too?
+                // For now, computeHistory logic is robust.
+
+                computeHistory(holdings, p, savedCurrency || currency, '1D');
+
             } catch (e) {
                 // If API fails, try to load cache (even if stale)
                 const loaded = await loadCache();
@@ -445,6 +529,21 @@ export default function HomeScreen() {
         }
     };
 
+    const [coinDeltas, setCoinDeltas] = useState({});
+
+    const [showSmallBalances, setShowSmallBalances] = useState(false);
+
+    // Filter for display
+    const visiblePortfolio = useMemo(() => {
+        if (!portfolio) return [];
+        return portfolio
+            .filter(p => showSmallBalances || p.value >= 10)
+            .sort((a, b) => b.value - a.value);
+    }, [portfolio, showSmallBalances]);
+
+    // Count hidden
+    const hiddenCount = (portfolio?.length || 0) - visiblePortfolio.length;
+
     if (booting) {
         return (
             <SafeAreaView style={[styles.container, styles.centerContent]}>
@@ -470,87 +569,194 @@ export default function HomeScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#000" />
-
-            {/* HEADER */}
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Portfolios</Text>
-                <View style={{ flexDirection: 'row' }}>
-                    <TouchableOpacity onPress={refreshPrices} disabled={loading} style={styles.iconBtn}>
-                        <RefreshCw color="#fff" size={20} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={wipeDb} disabled={loading} style={styles.iconBtn}>
-                        <Trash2 color="#fff" size={20} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={pickAndImportCsv} disabled={loading} style={styles.iconBtn}>
-                        <Plus color="#fff" size={20} />
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                {/* HERO */}
-                <View style={styles.heroSection}>
-                    <Text style={styles.heroLabel}>Total Worth</Text>
-                    <Text style={styles.heroValue}>{formatMoney(totalValue, currency)}</Text>
-                    <View style={styles.deltaRow}>
-                        <Text style={[styles.deltaText, delta.val >= 0 ? styles.textGreen : styles.textRed]}>
-                            {delta.val >= 0 ? '+' : ''}{formatMoney(delta.val, currency)} ({delta.val >= 0 ? '+' : ''}{delta.pct.toFixed(2)}%)
-                        </Text>
+        <View style={styles.container}>
+            <ScrollView
+                contentContainerStyle={{ paddingBottom: 100 }}
+                refreshControl={
+                    <RefreshControl refreshing={loading} onRefresh={refreshPrices} tintColor="#fff" />
+                }
+            >
+                <View style={styles.header}>
+                    <View>
+                        <Text style={styles.subTitle}>Total Worth</Text>
+                        <TouchableOpacity onPress={() => {
+                            const next = currency === 'EUR' ? 'GBP' : currency === 'GBP' ? 'USD' : 'EUR';
+                            setCurrencyAndReload(next);
+                        }}>
+                            <Text style={styles.totalText}>
+                                {formatMoney(totalValue, currency)}
+                            </Text>
+                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                            <Text style={{
+                                color: delta.val >= 0 ? '#22c55e' : '#ef4444',
+                                fontSize: 16,
+                                fontWeight: '600',
+                                marginRight: 6
+                            }}>
+                                {delta.val >= 0 ? '+' : ''}{formatMoney(delta.val, currency)}
+                            </Text>
+                            <View style={{
+                                backgroundColor: delta.val >= 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                paddingHorizontal: 6,
+                                paddingVertical: 2,
+                                borderRadius: 4
+                            }}>
+                                <Text style={{
+                                    color: delta.val >= 0 ? '#22c55e' : '#ef4444',
+                                    fontSize: 12,
+                                    fontWeight: '700'
+                                }}>
+                                    {delta.pct.toFixed(2)}%
+                                </Text>
+                            </View>
+                        </View>
                     </View>
+                    <TouchableOpacity onPress={() => router.push('/settings')} style={styles.iconButton}>
+                        <Settings color="#fff" size={24} />
+                    </TouchableOpacity>
                 </View>
 
                 {/* GRAPH */}
-                <View style={styles.chartSection}>
-                    {graphLoading ? (
-                        <View style={{ height: 220, justifyContent: 'center', alignItems: 'center' }}>
-                            <ActivityIndicator color={chartColor} />
-                        </View>
-                    ) : (
-                        <CryptoGraph type="line" data={chartData} color={chartColor} currency={currency} />
-                    )}
-
-                    <View style={styles.rangeRow}>
+                <View style={{ marginBottom: 24 }}>
+                    <CryptoGraph
+                        data={chartData}
+                        currentValue={totalValue}
+                        currency={currency}
+                        type="line"
+                        onRangeChange={() => { }}
+                        showGrid={false}
+                        height={220}
+                        color={chartColor}
+                    />
+                    {/* Range Selector */}
+                    <View style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        paddingHorizontal: 16,
+                        marginTop: 16
+                    }}>
                         {['1H', '1D', '1W', '1M', '1Y', 'ALL'].map(r => (
-                            <TouchableOpacity key={r} onPress={() => setRange(r)}>
-                                <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>{r}</Text>
+                            <TouchableOpacity
+                                key={r}
+                                onPress={() => setRange(r)}
+                                disabled={graphLoading}
+                                style={{
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 12,
+                                    borderRadius: 16,
+                                    backgroundColor: range === r ? '#334155' : 'transparent',
+                                    opacity: graphLoading ? 0.5 : 1
+                                }}
+                            >
+                                <Text style={{
+                                    color: range === r ? '#fff' : '#94a3b8',
+                                    fontWeight: '600',
+                                    fontSize: 13
+                                }}>{r}</Text>
                             </TouchableOpacity>
                         ))}
                     </View>
+                    {graphLoading && (
+                        <ActivityIndicator size="small" color="#ffff" style={{ marginTop: 10 }} />
+                    )}
                 </View>
 
-                {/* ASSETS */}
-                <View style={styles.assetsList}>
-                    {portfolio.map((coin) => (
-                        <TouchableOpacity
-                            key={coin.symbol}
-                            style={styles.coinRow}
-                            onPress={() => router.push(`/coin/${coin.symbol}`)}
-                        >
-                            <View style={styles.coinLeft}>
-                                <View style={styles.coinIcon}>
-                                    <Text style={styles.coinIconText}>{coin.symbol[0]}</Text>
-                                </View>
-                                <View>
-                                    <Text style={styles.rowSymbol}>{coin.symbol}</Text>
-                                    <Text style={styles.rowQty}>{coin.quantity.toFixed(4)} <Text style={{ color: '#64748b' }}>| {formatMoney(coin.price, currency)}</Text></Text>
-                                </View>
-                            </View>
+                {/* ASSETS LIST */}
+                <View style={{ paddingHorizontal: 16 }}>
+                    <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>Assets</Text>
 
-                            <View style={styles.coinRight}>
-                                <Text style={styles.rowValue}>{formatMoney(coin.value, currency)}</Text>
-                                <View style={{ flexDirection: 'row' }}>
-                                    <Text style={[styles.changeText, coin.change24h >= 0 ? styles.textGreen : styles.textRed]}>
-                                        {coin.change24h >= 0 ? '+' : ''}{coin.change24h.toFixed(2)}%
-                                    </Text>
+                    {visiblePortfolio.map((item) => {
+                        // Use calculated delta if avail
+                        let deltaData = coinDeltas[item.symbol];
+
+                        // If deltaData is missing or undefined
+                        if (!deltaData) {
+                            // Fallback approximation using 24h change
+                            const startPrice = item.price / (1 + (item.change24h / 100));
+                            const valDelta = (item.price - startPrice) * item.quantity;
+                            deltaData = { val: valDelta, pct: item.change24h };
+                        }
+
+                        // Safety check: if deltaData came from legacy state as just a number (unlikely but possible during hot reload)
+                        if (typeof deltaData === 'number') {
+                            const pct = deltaData;
+                            const startPrice = item.price / (1 + (pct / 100));
+                            const valDelta = (item.price - startPrice) * item.quantity;
+                            deltaData = { val: valDelta, pct: pct };
+                        }
+
+                        const isPositive = deltaData.val >= 0;
+
+                        return (
+                            <TouchableOpacity
+                                key={item.symbol}
+                                style={styles.coinRow}
+                                onPress={() => router.push({ pathname: '/coin/[id]', params: { id: item.symbol, currency } })}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    {/* Icon Placeholder */}
+                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>{item.symbol[0]}</Text>
+                                    </View>
+                                    <View>
+                                        <Text style={styles.coinSymbol}>{item.symbol}</Text>
+                                        <Text style={styles.coinPrice}>
+                                            {item.quantity.toFixed(0)} | {formatMoney(item.price, currency)}
+                                        </Text>
+                                    </View>
                                 </View>
-                            </View>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                    <Text style={styles.coinValue}>{formatMoney(item.value, currency)}</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Text style={{
+                                            color: isPositive ? '#4ade80' : '#f87171',
+                                            fontSize: 13,
+                                            fontWeight: '500'
+                                        }}>
+                                            {isPositive ? '+' : ''}{formatMoney(deltaData.val, currency)}
+                                        </Text>
+                                        <Text style={{
+                                            color: isPositive ? '#4ade80' : '#f87171',
+                                            fontSize: 13,
+                                            marginLeft: 6
+                                        }}>
+                                            ({isPositive ? '+' : ''}{deltaData.pct.toFixed(2)}%)
+                                        </Text>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        )
+                    })}
+
+                    {/* Show/Hide Button */}
+                    {hiddenCount > 0 && (
+                        <TouchableOpacity
+                            onPress={() => setShowSmallBalances(!showSmallBalances)}
+                            style={{
+                                alignSelf: 'center',
+                                marginTop: 12,
+                                paddingVertical: 8,
+                                paddingHorizontal: 16,
+                            }}
+                        >
+                            <Text style={{ color: '#64748b', fontSize: 13, fontWeight: '500' }}>
+                                {showSmallBalances ? 'Hide Small Balances' : `Show ${hiddenCount} Small Balances`}
+                            </Text>
                         </TouchableOpacity>
-                    ))}
+                    )}
+
+                    {/* Add Button */}
+                    <TouchableOpacity
+                        style={styles.addButton}
+                        onPress={() => router.push('/add-transaction')}
+                    >
+                        <Plus color="#000" size={24} />
+                        <Text style={{ color: '#000', fontWeight: 'bold', marginLeft: 8 }}>Add Transaction</Text>
+                    </TouchableOpacity>
                 </View>
             </ScrollView>
-        </SafeAreaView>
+        </View>
     );
 }
 
@@ -558,9 +764,10 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000000' },
     centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
 
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
-    headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-    iconBtn: { marginLeft: 16 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 12, paddingTop: 60 },
+    subTitle: { color: '#94a3b8', fontSize: 14, marginTop: 4 },
+    totalText: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginVertical: 4 },
+    iconButton: { padding: 8, backgroundColor: '#334155', borderRadius: 20 },
 
     scrollContent: { paddingBottom: 40 },
 
@@ -587,6 +794,15 @@ const styles = StyleSheet.create({
     changeText: { fontSize: 14, fontWeight: '600', marginTop: 2 },
     textGreen: { color: '#22c55e' },
     textRed: { color: '#ef4444' },
+
+    coinSymbol: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
+    coinPrice: { color: '#94a3b8', fontSize: 13 },
+    coinValue: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
+
+    addButton: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, marginTop: 24
+    },
 
     title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginTop: 16 },
     subtitle: { color: '#94a3b8', marginTop: 8, marginBottom: 24 },
