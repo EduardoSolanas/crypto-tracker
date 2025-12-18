@@ -14,11 +14,12 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getMeta, initDb, insertTransactions } from '../src/db';
+import { getMeta, getTransactionById, initDb, insertTransactions, syncHoldingsForSymbol, updateTransaction } from '../src/db';
 
 export default function AddTransactionScreen() {
     const params = useLocalSearchParams();
     const [loading, setLoading] = useState(false);
+    const txId = params.id;
 
     // Form State
     const [symbol, setSymbol] = useState(params.symbol || '');
@@ -29,10 +30,23 @@ export default function AddTransactionScreen() {
     const [currency, setCurrency] = useState('EUR');
 
     useEffect(() => {
-        initDb().then(() => getMeta('currency')).then(c => {
+        (async () => {
+            await initDb();
+            const c = await getMeta('currency');
             if (c) setCurrency(c);
-        });
-    }, []);
+
+            if (txId) {
+                const tx = await getTransactionById(txId);
+                if (tx) {
+                    setSymbol(tx.symbol);
+                    setType(tx.way);
+                    setAmount(String(tx.amount));
+                    setPrice(String(tx.quote_amount / tx.amount));
+                    setDate(tx.date_iso.split('T')[0]);
+                }
+            }
+        })();
+    }, [txId]);
 
     const handleSave = async () => {
         if (!symbol || !amount || !price) {
@@ -62,7 +76,13 @@ export default function AddTransactionScreen() {
                 notes: 'Manual entry'
             };
 
-            await insertTransactions([newTx]);
+            if (txId) {
+                await updateTransaction(txId, newTx);
+            } else {
+                await insertTransactions([newTx]);
+            }
+
+            await syncHoldingsForSymbol(newTx.symbol);
 
             // Go back
             router.back();

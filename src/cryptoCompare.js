@@ -143,13 +143,13 @@ export async function fetchHistory(symbol, currency, limit = 30) {
     return fetchCandles(symbol, currency, 'day', limit);
 }
 
-export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 30) {
+export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 30, aggregate = 1) {
     try {
         let endpoint = 'histoday';
         if (timeframe === 'hour') endpoint = 'histohour';
         if (timeframe === 'minute') endpoint = 'histominute';
 
-        const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${symbol}&tsym=${currency}&limit=${limit}`;
+        const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${symbol}&tsym=${currency}&limit=${limit}&aggregate=${aggregate}`;
         const res = await fetch(url);
         const json = await res.json();
 
