@@ -60,7 +60,7 @@ export async function listTransactionsBySymbol(symbol) {
 }
 
 export async function getAllTransactions() {
-    return mem.transactions.sort((a, b) => (a.date_iso > b.date_iso ? 1 : -1));
+    return mem.transactions.sort((a, b) => (a.date_iso < b.date_iso ? -1 : 1));
 }
 
 /* ---------------- HOLDINGS ---------------- */

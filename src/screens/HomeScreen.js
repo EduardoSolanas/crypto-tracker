@@ -27,7 +27,12 @@ const log = (...args) => {
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
+// Cache expiration times
+const CACHE_MAJOR = 10 * 60 * 1000;  // 10 minutes for assets > $10
+const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
+
 import { formatMoney } from '../utils/format';
+import { computePortfolioHistory } from '../utils/portfolioHistory';
 
 export default function HomeScreen() {
     const [booting, setBooting] = useState(true);
@@ -107,172 +112,27 @@ export default function HomeScreen() {
     // Compute History with dynamic range support
     const computeHistory = async (allTxns, currentPortfolio, currency, selectedRange) => {
         try {
-            const startTime = Date.now();
             setGraphLoading(true);
 
-            if (!allTxns || !allTxns.length) {
-                const now = Date.now();
-                setChartData([{ timestamp: now - 86400000, value: 0 }, { timestamp: now, value: 0 }]);
-                setChartColor('#94a3b8');
-                setDelta({ val: 0, pct: 0 });
-                setGraphLoading(false);
-                return;
-            }
-
-            // FILTER: Only fetch history for assets with value > 10
-            const significantSymbols = new Set();
-            if (currentPortfolio) {
-                currentPortfolio.forEach(p => {
-                    if (p.value > 10) significantSymbols.add(p.symbol);
-                });
-            }
-
-            // --- 1. PARAMS & TIME POINTS ---
-            let rLimit = 30;
-            let rTimeframe = 'day';
-            switch (selectedRange) {
-                case '1H': rTimeframe = 'minute'; rLimit = 60; break;
-                case '1D': rTimeframe = 'minute'; rLimit = 1440; break;
-                case '1W': rTimeframe = 'hour'; rLimit = 168; break;
-                case '1M': rTimeframe = 'day'; rLimit = 30; break;
-                case '1Y': rTimeframe = 'day'; rLimit = 365; break;
-                case 'ALL': rTimeframe = 'day'; rLimit = 1980; break;
-                default: rTimeframe = 'day'; rLimit = 90;
-            }
-
-            let stepSeconds = 86400;
-            if (rTimeframe === 'hour') stepSeconds = 3600;
-            if (rTimeframe === 'minute') stepSeconds = 60;
-
-            const nowSec = Math.floor(Date.now() / 1000);
-            const gridNow = Math.floor(nowSec / stepSeconds) * stepSeconds;
-
-            // PERFORMANCE CAP: Don't simulate more than ~100 points for maximum smoothness
-            let simStep = stepSeconds;
-            let simLimit = rLimit;
-            if (rLimit > 100) {
-                const multiplier = Math.ceil(rLimit / 100);
-                simStep = stepSeconds * multiplier;
-                simLimit = Math.floor(rLimit / multiplier);
-            }
-
-            let timePoints = [];
-            for (let i = simLimit; i >= 0; i--) {
-                const ts = gridNow - (i * simStep);
-                if (ts <= nowSec) timePoints.push(ts);
-            }
-            if (nowSec - timePoints[timePoints.length - 1] > 1) timePoints.push(nowSec);
-
-            // --- 2. FETCH HISTORY ---
+            // Dynamically import fetchCandles to avoid circular dependency issues if any
+            // though standard import at top is usually fine, complying with existing style
             const { fetchCandles } = await import('../cryptoCompare');
-            const historyMap = {};
-            const symbolsToFetch = Array.from(significantSymbols);
 
-            if (symbolsToFetch.length > 0) {
-                await Promise.all(
-                    symbolsToFetch.map(async (sym) => {
-                        try {
-                            const data = await fetchCandles(sym, currency, rTimeframe, rLimit + 20);
-                            if (data && data.length) data.sort((a, b) => a.time - b.time);
-                            historyMap[sym] = data || [];
-                        } catch (err) {
-                            historyMap[sym] = [];
-                        }
-                    })
-                );
-            }
-
-            // --- 3. EFFICIENT SIMULATION ---
-            const sortedTxns = [...allTxns].sort((a, b) => {
-                const da = new Date(a.dateISO || a.date_iso).getTime();
-                const db = new Date(b.dateISO || b.date_iso).getTime();
-                return da - db;
+            const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
+                allTxns,
+                currentPortfolio,
+                currency,
+                range: selectedRange,
+                fetchCandles
             });
 
-            const quantities = {};
-            let txnPointer = 0;
-            const historyPointers = {};
-            symbolsToFetch.forEach(s => historyPointers[s] = 0);
-
-            let graphPoints = timePoints.map(tPoint => {
-                while (txnPointer < sortedTxns.length) {
-                    const t = sortedTxns[txnPointer];
-                    const tTime = new Date(t.dateISO || t.date_iso).getTime() / 1000;
-                    if (tTime > tPoint) break;
-
-                    if (!quantities[t.symbol]) quantities[t.symbol] = 0;
-                    if (['BUY', 'DEPOSIT', 'RECEIVE'].includes(t.way)) quantities[t.symbol] += t.amount;
-                    if (['SELL', 'WITHDRAW', 'SEND'].includes(t.way)) quantities[t.symbol] -= t.amount;
-                    txnPointer++;
-                }
-
-                let val = 0;
-                for (const [sym, qty] of Object.entries(quantities)) {
-                    if (qty <= 0.00000001) continue;
-                    const hist = historyMap[sym];
-                    if (!hist || hist.length === 0) continue;
-
-                    let ptr = historyPointers[sym] || 0;
-                    while (ptr < hist.length - 1 && hist[ptr + 1].time <= tPoint) {
-                        ptr++;
-                    }
-                    historyPointers[sym] = ptr;
-                    if (hist[ptr].time <= tPoint + simStep) {
-                        val += qty * hist[ptr].close;
-                    }
-                }
-                return { timestamp: tPoint * 1000, value: val };
-            });
-
-            const endTime = Date.now();
-            console.log(`[PERF] Graph Simulation: ${endTime - startTime}ms (${graphPoints.length} points)`);
-
-            // --- 4. POST-PROCESS ---
-            const firstActiveIndex = graphPoints.findIndex(p => p.value > 0.0001);
-            if (firstActiveIndex > 0 && ['1M', '1Y', 'ALL'].includes(selectedRange)) {
-                graphPoints = graphPoints.slice(firstActiveIndex);
-            }
-
-            let newDelta = { val: 0, pct: 0 };
-            if (graphPoints.length > 0) {
-                const startVal = graphPoints[0].value;
-                const endVal = graphPoints[graphPoints.length - 1].value;
-                const diff = endVal - startVal;
-                const pct = startVal > 0.0001 ? (diff / startVal) * 100 : 0;
-                newDelta = { val: diff, pct };
-                setDelta(newDelta);
-                setChartColor(diff >= 0 ? '#22c55e' : '#ef4444');
-            }
-
-            // --- 5. ASSET PERFORMANCE ---
-            const getAssetPerformance = (item, history, range, startTime) => {
-                const { price, quantity, change24h } = item;
-                if (range === '1D') {
-                    const startPrice = price / (1 + (change24h / 100));
-                    return { val: (price - startPrice) * quantity, pct: change24h };
-                }
-                if (!history || history.length === 0) return { val: 0, pct: 0 };
-                const startNode = history.find(c => c.time >= startTime) || history[0];
-                const startPrice = startNode.open || startNode.close;
-                if (startPrice > 0) {
-                    const diff = price - startPrice;
-                    return { val: diff * quantity, pct: (diff / startPrice) * 100 };
-                }
-                return { val: 0, pct: 0 };
-            };
-
-            const newCoinDeltas = {};
-            const rangeStart = timePoints[0];
-            if (currentPortfolio) {
-                currentPortfolio.forEach(item => {
-                    newCoinDeltas[item.symbol] = getAssetPerformance(item, historyMap[item.symbol], selectedRange, rangeStart);
-                });
-            }
-            setCoinDeltas(newCoinDeltas);
-            setChartData(graphPoints);
+            setChartData(chartData);
+            setDelta(delta);
+            setChartColor(chartColor);
+            setCoinDeltas(coinDeltas);
 
             if (currentPortfolio?.length) {
-                saveCache(currentPortfolio, graphPoints, newDelta, selectedRange);
+                saveCache(currentPortfolio, chartData, delta, selectedRange);
             }
 
         } catch (e) {
@@ -288,7 +148,7 @@ export default function HomeScreen() {
                 computeHistory(txs, portfolio, currency, range);
             });
         }
-    }, [range, portfolio]); // Trigger on range or portfolio change
+    }, [range, portfolio, currency]); // Trigger on range, portfolio, or currency change
 
     useEffect(() => {
         (async () => {

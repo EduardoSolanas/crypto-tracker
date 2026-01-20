@@ -13,7 +13,7 @@ export default function Graph({
     width,
     height = 220
 }) {
-    const [range, setRange] = useState('1M');
+    const [range, setRange] = useState('1D');
     const [hoverValue, setHoverValue] = useState(null);
 
     const handleRangePress = (r) => {
@@ -52,7 +52,7 @@ export default function Graph({
             <View style={styles.chartWrapper}>
                 {loading ? (
                     <View style={[styles.center, { height }]}>
-                        <ActivityIndicator color="#2563eb" />
+                        <ActivityIndicator testID="loading-indicator" color="#2563eb" />
                     </View>
                 ) : (
                     data && data.length > 0 ? (
