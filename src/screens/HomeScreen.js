@@ -33,8 +33,10 @@ const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
 
 import { formatMoney } from '../utils/format';
 import { computePortfolioHistory } from '../utils/portfolioHistory';
+import { useTheme } from '../utils/theme';
 
 export default function HomeScreen() {
+    const { colors, isDark } = useTheme();
     const [booting, setBooting] = useState(true);
     const [loading, setLoading] = useState(false);
     const [currency, setCurrency] = useState('EUR');
@@ -307,22 +309,22 @@ export default function HomeScreen() {
 
     if (booting) {
         return (
-            <SafeAreaView style={[styles.container, styles.centerContent]}>
-                <ActivityIndicator color="#fff" />
+            <SafeAreaView style={[{ flex: 1, backgroundColor: colors.background }, styles.centerContent]}>
+                <ActivityIndicator color={colors.text} />
             </SafeAreaView>
         );
     }
 
     if (!portfolio) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor="#000" />
+            <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+                <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
                 <View style={[styles.centerContent]}>
-                    <TrendingUp color="#fff" size={48} />
-                    <Text style={styles.title}>Portfolio</Text>
-                    <Text style={styles.subtitle}>No data. Import CSV.</Text>
-                    <TouchableOpacity style={styles.uploadBtn} onPress={pickAndImportCsv} disabled={loading}>
-                        {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.uploadBtnText}>Import CSV</Text>}
+                    <TrendingUp color={colors.text} size={48} />
+                    <Text style={[styles.title, { color: colors.text }]}>Portfolio</Text>
+                    <Text style={[styles.subtitle, { color: colors.textSecondary }]}>No data. Import CSV.</Text>
+                    <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.primary }]} onPress={pickAndImportCsv} disabled={loading}>
+                        {loading ? <ActivityIndicator color={colors.primaryInverse} /> : <Text style={[styles.uploadBtnText, { color: colors.primaryInverse }]}>Import CSV</Text>}
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -330,27 +332,27 @@ export default function HomeScreen() {
     }
 
     return (
-        <View style={styles.container}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
             <ScrollView
                 contentContainerStyle={{ paddingBottom: 100 }}
                 refreshControl={
-                    <RefreshControl refreshing={loading} onRefresh={refreshPrices} tintColor="#fff" />
+                    <RefreshControl refreshing={loading} onRefresh={refreshPrices} tintColor={colors.text} />
                 }
             >
-                <View style={styles.header}>
+                <View style={[styles.header, { paddingTop: 60 }]}>
                     <View>
-                        <Text style={styles.subTitle}>Total Worth</Text>
+                        <Text style={[styles.subTitle, { color: colors.textSecondary }]}>Total Worth</Text>
                         <TouchableOpacity onPress={() => {
                             const next = currency === 'EUR' ? 'GBP' : currency === 'GBP' ? 'USD' : 'EUR';
                             setCurrencyAndReload(next);
                         }}>
-                            <Text style={styles.totalText}>
+                            <Text style={[styles.totalText, { color: colors.text }]}>
                                 {formatMoney(totalValue, currency)}
                             </Text>
                         </TouchableOpacity>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                             <Text style={{
-                                color: delta.val >= 0 ? '#22c55e' : '#ef4444',
+                                color: delta.val >= 0 ? colors.success : colors.error,
                                 fontSize: 16,
                                 fontWeight: '600',
                                 marginRight: 6
@@ -358,13 +360,13 @@ export default function HomeScreen() {
                                 {delta.val >= 0 ? '+' : ''}{formatMoney(delta.val, currency)}
                             </Text>
                             <View style={{
-                                backgroundColor: delta.val >= 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                backgroundColor: delta.val >= 0 ? colors.successBg : colors.errorBg,
                                 paddingHorizontal: 6,
                                 paddingVertical: 2,
                                 borderRadius: 4
                             }}>
                                 <Text style={{
-                                    color: delta.val >= 0 ? '#22c55e' : '#ef4444',
+                                    color: delta.val >= 0 ? colors.success : colors.error,
                                     fontSize: 12,
                                     fontWeight: '700'
                                 }}>
@@ -373,8 +375,8 @@ export default function HomeScreen() {
                             </View>
                         </View>
                     </View>
-                    <TouchableOpacity onPress={() => router.push('/settings')} style={styles.iconButton}>
-                        <Settings color="#fff" size={24} />
+                    <TouchableOpacity onPress={() => router.push('/settings')} style={[styles.iconButton, { backgroundColor: colors.surfaceElevated }]}>
+                        <Settings color={colors.text} size={24} />
                     </TouchableOpacity>
                 </View>
 
@@ -406,12 +408,12 @@ export default function HomeScreen() {
                                     paddingVertical: 6,
                                     paddingHorizontal: 12,
                                     borderRadius: 16,
-                                    backgroundColor: range === r ? '#334155' : 'transparent',
+                                    backgroundColor: range === r ? colors.surfaceElevated : 'transparent',
                                     opacity: graphLoading ? 0.5 : 1
                                 }}
                             >
                                 <Text style={{
-                                    color: range === r ? '#fff' : '#94a3b8',
+                                    color: range === r ? colors.text : colors.textSecondary,
                                     fontWeight: '600',
                                     fontSize: 13
                                 }}>{r}</Text>
@@ -419,13 +421,13 @@ export default function HomeScreen() {
                         ))}
                     </View>
                     {graphLoading && (
-                        <ActivityIndicator size="small" color="#ffff" style={{ marginTop: 10 }} />
+                        <ActivityIndicator size="small" color={colors.text} style={{ marginTop: 10 }} />
                     )}
                 </View>
 
                 {/* ASSETS LIST */}
                 <View style={{ paddingHorizontal: 16 }}>
-                    <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>Assets</Text>
+                    <Text style={{ color: colors.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>Assets</Text>
 
                     {visiblePortfolio.map((item) => {
                         // Use calculated delta if avail
@@ -457,8 +459,8 @@ export default function HomeScreen() {
                             >
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     {/* Icon Placeholder */}
-                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>{item.symbol[0]}</Text>
+                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                        <Text style={{ color: colors.text, fontWeight: 'bold' }}>{item.symbol[0]}</Text>
                                     </View>
                                     <View>
                                         <Text style={styles.coinSymbol}>{item.symbol}</Text>
@@ -471,14 +473,14 @@ export default function HomeScreen() {
                                     <Text style={styles.coinValue}>{formatMoney(item.value, currency)}</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                         <Text style={{
-                                            color: isPositive ? '#4ade80' : '#f87171',
+                                            color: isPositive ? colors.successLight : colors.errorLight,
                                             fontSize: 13,
                                             fontWeight: '500'
                                         }}>
                                             {isPositive ? '+' : ''}{formatMoney(deltaData.val, currency)}
                                         </Text>
                                         <Text style={{
-                                            color: isPositive ? '#4ade80' : '#f87171',
+                                            color: isPositive ? colors.successLight : colors.errorLight,
                                             fontSize: 13,
                                             marginLeft: 6
                                         }}>

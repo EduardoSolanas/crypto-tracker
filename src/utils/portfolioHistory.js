@@ -41,13 +41,13 @@ export const computePortfolioHistory = async ({
     let rLimit = 30;
     let rTimeframe = 'day';
     switch (range) {
-        case '1H':  rTimeframe = 'minute'; rLimit = 30; break;  // 2 min intervals
-        case '1D':  rTimeframe = 'hour';   rLimit = 24; break;  // Hourly (MAJOR OPTIMIZATION)
-        case '1W':  rTimeframe = 'hour';   rLimit = 42; break;  // 4 hour intervals
-        case '1M':  rTimeframe = 'day';    rLimit = 30; break;  // Daily
-        case '1Y':  rTimeframe = 'day';    rLimit = 52; break;  // Weekly
-        case 'ALL': rTimeframe = 'day';    rLimit = 50; break;  // Adaptive
-        default:    rTimeframe = 'day';    rLimit = 30;
+        case '1H': rTimeframe = 'minute'; rLimit = 30; break;  // 2 min intervals
+        case '1D': rTimeframe = 'hour'; rLimit = 24; break;  // Hourly (MAJOR OPTIMIZATION)
+        case '1W': rTimeframe = 'hour'; rLimit = 42; break;  // 4 hour intervals
+        case '1M': rTimeframe = 'day'; rLimit = 30; break;  // Daily
+        case '1Y': rTimeframe = 'day'; rLimit = 52; break;  // Weekly
+        case 'ALL': rTimeframe = 'day'; rLimit = 50; break;  // Adaptive
+        default: rTimeframe = 'day'; rLimit = 30;
     }
 
     let stepSeconds = 86400;
@@ -170,28 +170,23 @@ export const computePortfolioHistory = async ({
         // Look for candle at or after rangeStart, or closest before it
         let bestCandle = null;
         let bestDiff = Infinity;
-        
+
         for (const candle of history) {
             const diff = Math.abs(candle.time - rangeStart);
             if (diff < bestDiff) {
                 bestDiff = diff;
                 bestCandle = candle;
             }
-            // If we've found a candle at or after rangeStart, use it
+            // Early exit if we've passed rangeStart (no need to check further)
             if (candle.time >= rangeStart) {
-                bestCandle = candle;
                 break;
             }
         }
-        
-        // Fallback: if no good candle found, use first candle
-        if (!bestCandle && history.length > 0) {
-            bestCandle = history[0];
-        }
-        
+
+        // bestCandle is guaranteed to be set if history.length > 0
         if (!bestCandle) return { val: 0, pct: 0 };
-        
-        const startPrice = bestCandle.open || bestCandle.close;
+
+        const startPrice = bestCandle.open || bestCandle.close || 0;
 
         if (startPrice > 0) {
             const diff = price - startPrice;

@@ -3,7 +3,7 @@
  * Tests CSV parsing, holdings computation, and per-asset performance
  */
 
-import { parseDeltaCsvToTxns, computeHoldingsFromTxns } from '../../csv';
+import { computeHoldingsFromTxns, parseDeltaCsvToTxns } from '../../csv';
 import { computePortfolioHistory } from '../portfolioHistory';
 
 describe('Transaction Processing & Profit Calculations', () => {
@@ -228,7 +228,7 @@ data,data,data`;
             // Verify coinDeltas
             expect(result.coinDeltas.BTC).toBeDefined();
             expect(result.coinDeltas.BTC.pct).toBeCloseTo(8.33, 1);
-            
+
             // Value delta should be ~$4000 (52000 - 48000)
             // startPrice = 52000 / (1 + 0.0833) = 48000
             expect(result.coinDeltas.BTC.val).toBeGreaterThan(3500);
@@ -522,10 +522,10 @@ data,data,data`;
             // First value should be ~45000-46000 (1 BTC at start of history)
             expect(result.chartData[0].value).toBeGreaterThan(44000);
             expect(result.chartData[0].value).toBeLessThan(47000);
-            
+
             // End: 2 BTC * 51800 = 103600
             expect(result.chartData[result.chartData.length - 1].value).toBeCloseTo(103600, -2);
-            
+
             // Profit includes both price increase AND quantity increase
             expect(result.delta.val).toBeGreaterThan(50000);
         });
@@ -648,5 +648,170 @@ data,data,data`;
             // Final quantity should be: 1 - 0.5 + 1 - 0.8 + 0.5 = 1.2
             expect(result.chartData[result.chartData.length - 1].value).toBeCloseTo(60000, -2);
         });
+
+        it('selects closest candle when rangeStart falls between candles', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const rangeStartTime = nowSec - 30 * 86400; // 30 days ago
+
+            // Create history with gap around rangeStart
+            const btcHistory = [
+                { time: rangeStartTime - 86400, open: 45000, close: 45000 },  // 1 day before (closer)
+                { time: rangeStartTime + 86400, open: 47000, close: 47000 }   // 1 day after
+            ];
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date((nowSec - 45 * 86400) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{
+                symbol: 'BTC',
+                value: 50000,
+                quantity: 1,
+                price: 50000,
+                change24h: 2
+            }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: '1M',
+                fetchCandles: mockFetchCandles
+            });
+
+            // Should use the closest candle (45000), not the first one >= rangeStart (47000)
+            // Profit should be: 50000 - 45000 = 5000
+            expect(result.coinDeltas.BTC.val).toBeCloseTo(5000, -2);
+            expect(result.coinDeltas.BTC.pct).toBeCloseTo(11.11, 0); // 5000/45000 * 100
+        });
+
+        it('handles malformed candle data without open or close prices', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+
+            const btcHistory = [
+                { time: nowSec - 30 * 86400 },  // No open or close!
+                { time: nowSec, open: 50000, close: 50000 }
+            ];
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date((nowSec - 45 * 86400) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{
+                symbol: 'BTC',
+                value: 50000,
+                quantity: 1,
+                price: 50000,
+                change24h: 2
+            }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: '1M',
+                fetchCandles: mockFetchCandles
+            });
+
+            // Should not crash, should return 0 profit when startPrice is 0
+            expect(result.coinDeltas.BTC).toEqual({ val: 0, pct: 0 });
+        });
+
+        it('handles candle with only close price (no open)', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+
+            const btcHistory = [
+                { time: nowSec - 30 * 86400, close: 45000 },  // Only close, no open
+                { time: nowSec, open: 50000, close: 50000 }
+            ];
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date((nowSec - 45 * 86400) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{
+                symbol: 'BTC',
+                value: 50000,
+                quantity: 1,
+                price: 50000,
+                change24h: 2
+            }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: '1M',
+                fetchCandles: mockFetchCandles
+            });
+
+            // Should use close price as fallback
+            expect(result.coinDeltas.BTC.val).toBeCloseTo(5000, -2);
+            expect(result.coinDeltas.BTC.pct).toBeCloseTo(11.11, 0);
+        });
+
+        it('calculates total portfolio delta from range start, not first non-zero point', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+
+            // User bought BTC 60 days ago at $30k
+            const txns = [{
+                dateISO: new Date((nowSec - 60 * 86400) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            // BTC price history: $30k at purchase, $40k at 30 days ago (1M range start), $50k now
+            const btcHistory = Array.from({ length: 65 }, (_, i) => {
+                const daysAgo = 65 - i;
+                const time = nowSec - daysAgo * 86400;
+                let price;
+                if (daysAgo >= 60) price = 30000;  // Purchase price
+                else if (daysAgo >= 30) price = 40000;  // 1M ago
+                else price = 50000;  // Recent
+                return { time, open: price, close: price };
+            });
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const portfolio = [{
+                symbol: 'BTC',
+                value: 50000,
+                quantity: 1,
+                price: 50000,
+                change24h: 2
+            }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: '1M',
+                fetchCandles: mockFetchCandles
+            });
+
+            // For 1M range, delta should be calculated from 30 days ago ($40k), not from first transaction ($30k)
+            // Expected: $50k - $40k = +$10k (+25%)
+            // Bug would give: $50k - $30k = +$20k (+66.67%) if calculated after slicing
+
+            expect(result.delta.val).toBeCloseTo(10000, -2);
+            expect(result.delta.pct).toBeCloseTo(25, 0);
+        });
+
     });
 });
