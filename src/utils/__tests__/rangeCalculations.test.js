@@ -14,12 +14,12 @@ describe('Range Calculation Logic - Deep Analysis', () => {
     });
 
     describe('Time Point Generation', () => {
-        it('1H range generates 30 minute-level points (2-min intervals)', async () => {
+        it('1H range uses minute data with 5-minute display intervals', async () => {
             const nowSec = Math.floor(Date.now() / 1000);
-            const gridNow = Math.floor(nowSec / 60) * 60; // Align to minute
+            const gridNow = Math.floor(nowSec / 3600) * 3600; // Align to hour
 
-            const btcHistory = Array.from({ length: 50 }, (_, i) => ({
-                time: gridNow - (50 - i) * 60,
+            const btcHistory = Array.from({ length: 60 }, (_, i) => ({
+                time: gridNow - (60 - i) * 3600,
                 close: 50000
             }));
 
@@ -42,15 +42,12 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should have ~30 points (2-min intervals)
-            expect(result.chartData.length).toBeGreaterThanOrEqual(28);
-            expect(result.chartData.length).toBeLessThanOrEqual(32);
+            // Should have ~12-13 points (5-minute display intervals over 1 hour)
+            expect(result.chartData.length).toBeGreaterThanOrEqual(10);
+            expect(result.chartData.length).toBeLessThanOrEqual(15);
 
-            // Verify points are 60 seconds apart (still minute data, just fewer points)
-            if (result.chartData.length >= 2) {
-                const timeDiff = result.chartData[1].timestamp - result.chartData[0].timestamp;
-                expect(timeDiff).toBe(60 * 1000); // 60 seconds in ms
-            }
+            // API should request minute data
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 80, 1);
         });
 
         it('1D range generates hourly points (24) - OPTIMIZED', async () => {
@@ -74,10 +71,10 @@ describe('Range Calculation Logic - Deep Analysis', () => {
             });
 
             // Verify API call parameters - now hourly, not minute!
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 44);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 44, 1);
         });
 
-        it('1W range generates 42 hourly points (4-hour intervals)', async () => {
+        it('1W range covers a full week using hourly data', async () => {
             const portfolio = [{ symbol: 'BTC', value: 50000, quantity: 1, price: 50000, change24h: 0 }];
             const txns = [{
                 dateISO: new Date(Date.now() - 10 * 86400 * 1000).toISOString(),
@@ -94,8 +91,8 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Now requests 42 hours of data + buffer
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 62);
+            // 7 days * 24 hours + 20 buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 188, 1);
         });
 
         it('1M range generates daily points (30)', async () => {
@@ -115,22 +112,22 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 50);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 50, 1);
         });
 
-        it('1Y range generates 52 weekly points - SIMPLIFIED', async () => {
+        it('1Y range generates up to 365 daily points', async () => {
             const nowSec = Math.floor(Date.now() / 1000);
             
-            // Generate 80 days of data
-            const btcHistory = Array.from({ length: 80 }, (_, i) => ({
-                time: nowSec - (80 - i) * 86400,
+            // Generate 400 days of data
+            const btcHistory = Array.from({ length: 400 }, (_, i) => ({
+                time: nowSec - (400 - i) * 86400,
                 close: 30000 + i * 50
             }));
 
             mockFetchCandles.mockResolvedValue(btcHistory);
 
             const txns = [{
-                dateISO: new Date((nowSec - 80 * 86400) * 1000).toISOString(),
+                dateISO: new Date((nowSec - 400 * 86400) * 1000).toISOString(),
                 symbol: 'BTC',
                 amount: 1,
                 way: 'BUY'
@@ -146,24 +143,36 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Simplified: Should have ~52 points (weekly sampling)
-            expect(result.chartData.length).toBeLessThanOrEqual(54);
-            expect(result.chartData.length).toBeGreaterThan(50);
+            // Should have ~50 sampled points (365 days sampled to ~50 points)
+            expect(result.chartData.length).toBeLessThanOrEqual(55);
+            expect(result.chartData.length).toBeGreaterThan(45);
 
-            // Verify API requested 52 days worth
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 72);
+            // Verify API requested 365 days worth + buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 385, 1);
         });
 
-        it('ALL range uses 50 points - SIMPLIFIED', async () => {
-            const portfolio = [{ symbol: 'BTC', value: 50000, quantity: 1, price: 50000, change24h: 0 }];
+        it('ALL range calculates days since first transaction', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+            // Transaction from 500 days ago
+            const firstTxnTime = nowSec - (500 * 86400);
+            
+            const btcHistory = Array.from({ length: 520 }, (_, i) => ({
+                time: nowSec - (520 - i) * 86400,
+                close: 30000 + i * 50
+            }));
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
             const txns = [{
-                dateISO: new Date(Date.now() - 2500 * 86400 * 1000).toISOString(),
+                dateISO: new Date(firstTxnTime * 1000).toISOString(),
                 symbol: 'BTC',
                 amount: 1,
                 way: 'BUY'
             }];
 
-            await computePortfolioHistory({
+            const portfolio = [{ symbol: 'BTC', value: 50000, quantity: 1, price: 50000, change24h: 0 }];
+
+            const result = await computePortfolioHistory({
                 allTxns: txns,
                 currentPortfolio: portfolio,
                 currency: 'USD',
@@ -171,8 +180,54 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Simplified: Should cap at 50 days
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 70);
+            // Should request ~500 days of data (days since first txn)
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', expect.any(Number), expect.any(Number));
+            const requestedLimit = mockFetchCandles.mock.calls[0][3];
+            expect(requestedLimit).toBeGreaterThanOrEqual(500);
+            expect(requestedLimit).toBeLessThanOrEqual(550);
+
+            // Should have ~50 sampled points
+            expect(result.chartData.length).toBeLessThanOrEqual(55);
+            expect(result.chartData.length).toBeGreaterThan(45);
+        });
+
+        it('ALL range handles very old transactions (years ago)', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+            // Transaction from 2500 days ago (~7 years)
+            const firstTxnTime = nowSec - (2500 * 86400);
+            
+            const btcHistory = Array.from({ length: 2000 }, (_, i) => ({
+                time: nowSec - (2000 - i) * 86400,
+                close: 5000 + i * 20
+            }));
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date(firstTxnTime * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{ symbol: 'BTC', value: 50000, quantity: 1, price: 50000, change24h: 0 }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: 'ALL',
+                fetchCandles: mockFetchCandles
+            });
+
+            // Should cap at 2000 days (API limit)
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', expect.any(Number), expect.any(Number));
+            const requestedLimit = mockFetchCandles.mock.calls[0][3];
+            expect(requestedLimit).toBeLessThanOrEqual(2020); // 2000 + buffer
+
+            // Should still have ~50 sampled points
+            expect(result.chartData.length).toBeLessThanOrEqual(55);
+            expect(result.chartData.length).toBeGreaterThan(45);
         });
     });
 
@@ -550,20 +605,20 @@ describe('Range Calculation Logic - Deep Analysis', () => {
         });
     });
 
-    describe('Performance Cap Behavior - SIMPLIFIED', () => {
-        it('1Y range now uses 52 weekly points (no complex cap needed)', async () => {
+    describe('Performance Cap Behavior', () => {
+        it('1Y range samples to ~50 points for performance', async () => {
             const nowSec = Math.floor(Date.now() / 1000);
             
-            // Generate 60 days of data
-            const btcHistory = Array.from({ length: 60 }, (_, i) => ({
-                time: nowSec - (60 - i) * 86400,
+            // Generate 400 days of data
+            const btcHistory = Array.from({ length: 400 }, (_, i) => ({
+                time: nowSec - (400 - i) * 86400,
                 close: 30000 + i * 50
             }));
 
             mockFetchCandles.mockResolvedValue(btcHistory);
 
             const txns = [{
-                dateISO: new Date((nowSec - 60 * 86400) * 1000).toISOString(),
+                dateISO: new Date((nowSec - 400 * 86400) * 1000).toISOString(),
                 symbol: 'BTC',
                 amount: 1,
                 way: 'BUY'
@@ -579,17 +634,49 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should have ~52 points (weekly sampling, simplified)
-            expect(result.chartData.length).toBeLessThanOrEqual(54);
-            expect(result.chartData.length).toBeGreaterThan(50);
+            // Should be sampled to ~50 points
+            expect(result.chartData.length).toBeLessThanOrEqual(55);
+            expect(result.chartData.length).toBeGreaterThan(45);
+        });
+
+        it('ALL range samples to ~50 points regardless of data size', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
             
-            // Points should be ~1 day apart (daily, not complex multiplier)
-            if (result.chartData.length >= 2) {
-                const timeDiff = result.chartData[1].timestamp - result.chartData[0].timestamp;
-                const daysDiff = timeDiff / (86400 * 1000);
-                expect(daysDiff).toBeGreaterThanOrEqual(1);
-                expect(daysDiff).toBeLessThanOrEqual(1.1);  // Daily intervals
-            }
+            // Generate 1500 days of data (about 4 years)
+            const btcHistory = Array.from({ length: 1500 }, (_, i) => ({
+                time: nowSec - (1500 - i) * 86400,
+                close: 5000 + i * 30
+            }));
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date((nowSec - 1500 * 86400) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 1,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{ symbol: 'BTC', value: 50000, quantity: 1, price: 50000, change24h: 0 }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: 'ALL',
+                fetchCandles: mockFetchCandles
+            });
+
+            // Should be sampled to ~50 points
+            expect(result.chartData.length).toBeLessThanOrEqual(55);
+            expect(result.chartData.length).toBeGreaterThan(45);
+
+            // First point should be close to first transaction time
+            const firstPointTime = result.chartData[0].timestamp / 1000;
+            const expectedStartTime = nowSec - 1500 * 86400;
+            // Allow some tolerance due to sampling
+            const timeDiffDays = Math.abs(firstPointTime - expectedStartTime) / 86400;
+            expect(timeDiffDays).toBeLessThan(60); // Within ~2 months of first txn
         });
     });
 });

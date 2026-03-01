@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Check } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
     ActivityIndicator,
     Alert,
@@ -15,9 +16,29 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMeta, getTransactionById, initDb, insertTransactions, syncHoldingsForSymbol, updateTransaction } from '../src/db';
+import { useTheme } from '../src/utils/theme';
+
+function dateInputToUtcIso(dateInput) {
+    const raw = String(dateInput || '').trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (dateOnly) {
+        const year = Number(dateOnly[1]);
+        const month = Number(dateOnly[2]);
+        const day = Number(dateOnly[3]);
+        return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).toISOString();
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        throw new Error('INVALID_DATE_FORMAT');
+    }
+    return parsed.toISOString();
+}
 
 export default function AddTransactionScreen() {
     const params = useLocalSearchParams();
+    const { t } = useTranslation();
+    const { colors } = useTheme();
     const [loading, setLoading] = useState(false);
     const txId = params.id;
 
@@ -50,30 +71,31 @@ export default function AddTransactionScreen() {
 
     const handleSave = async () => {
         if (!symbol || !amount || !price) {
-            Alert.alert('Missing fields', 'Please fill in Symbol, Amount and Price');
+            Alert.alert(t('addTransaction.missingFieldsTitle'), t('addTransaction.missingFieldsMessage'));
             return;
         }
 
         setLoading(true);
         try {
+            const existingTx = txId ? await getTransactionById(txId) : null;
             const qty = parseFloat(amount);
             const p = parseFloat(price);
 
             if (isNaN(qty) || isNaN(p)) {
-                Alert.alert('Invalid numbers', 'Amount and Price must be numbers');
+                Alert.alert(t('addTransaction.invalidNumbersTitle'), t('addTransaction.invalidNumbersMessage'));
                 setLoading(false);
                 return;
             }
 
             const newTx = {
-                dateISO: new Date(date).toISOString(),
+                dateISO: dateInputToUtcIso(date),
                 symbol: symbol.toUpperCase(),
                 way: type,
                 amount: qty,
                 quoteCurrency: currency,
                 quoteAmount: p * qty, // Store total cost/value
                 fees: 0,
-                notes: 'Manual entry'
+                notes: t('addTransaction.manualEntry')
             };
 
             if (txId) {
@@ -83,24 +105,31 @@ export default function AddTransactionScreen() {
             }
 
             await syncHoldingsForSymbol(newTx.symbol);
+            if (existingTx?.symbol && existingTx.symbol !== newTx.symbol) {
+                await syncHoldingsForSymbol(existingTx.symbol);
+            }
 
             // Go back
             router.back();
         } catch (e) {
-            Alert.alert('Error', e.message);
+            if (e?.message === 'INVALID_DATE_FORMAT') {
+                Alert.alert(t('general.error'), t('addTransaction.dateInvalidMessage'));
+            } else {
+                Alert.alert(t('general.error'), e.message);
+            }
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-                    <ArrowLeft color="#fff" size={24} />
+                    <ArrowLeft color={colors.text} size={24} />
                 </TouchableOpacity>
-                <Text style={styles.title}>Add Transaction</Text>
+                <Text style={[styles.title, { color: colors.text }]}>{t('addTransaction.title')}</Text>
                 <View style={{ width: 40 }} />
             </View>
 
@@ -108,73 +137,73 @@ export default function AddTransactionScreen() {
                 <ScrollView contentContainerStyle={styles.form}>
 
                     {/* Type Selector */}
-                    <View style={styles.typeRow}>
+                    <View style={[styles.typeRow, { backgroundColor: colors.surface }]}>
                         {['BUY', 'SELL'].map(t => (
                             <TouchableOpacity
                                 key={t}
                                 style={[styles.typeBtn, type === t && (t === 'BUY' ? styles.bgGreen : styles.bgRed)]}
                                 onPress={() => setType(t)}
                             >
-                                <Text style={[styles.typeText, type === t && styles.textWhite]}>{t}</Text>
+                                <Text style={[styles.typeText, { color: colors.textSecondary }, type === t && styles.textWhite]}>{t}</Text>
                             </TouchableOpacity>
                         ))}
                     </View>
 
                     {/* Symbol */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Coin Symbol (e.g. BTC)</Text>
+                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addTransaction.symbolLabel')}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
                             value={symbol}
                             onChangeText={t => setSymbol(t.toUpperCase())}
                             placeholder="BTC"
-                            placeholderTextColor="#64748b"
+                            placeholderTextColor={colors.textSecondary}
                         />
                     </View>
 
                     {/* Amount */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Amount</Text>
+                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addTransaction.amountLabel')}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
                             value={amount}
                             onChangeText={setAmount}
                             placeholder="0.00"
-                            placeholderTextColor="#64748b"
+                            placeholderTextColor={colors.textSecondary}
                             keyboardType="numeric"
                         />
                     </View>
 
                     {/* Price per Coin */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Price per Coin ({currency})</Text>
+                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addTransaction.pricePerCoinLabel', { currency })}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
                             value={price}
                             onChangeText={setPrice}
                             placeholder="0.00"
-                            placeholderTextColor="#64748b"
+                            placeholderTextColor={colors.textSecondary}
                             keyboardType="numeric"
                         />
                     </View>
 
                     {/* Date */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
+                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addTransaction.dateLabel')}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
                             value={date}
                             onChangeText={setDate}
                             placeholder="2023-01-01"
-                            placeholderTextColor="#64748b"
+                            placeholderTextColor={colors.textSecondary}
                         />
                     </View>
 
-                    <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
-                        {loading ? <ActivityIndicator color="#000" /> : (
+                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={handleSave} disabled={loading}>
+                        {loading ? <ActivityIndicator color={colors.primaryInverse} /> : (
                             <>
-                                <Check color="#000" size={20} />
-                                <Text style={styles.saveText}>Save Transaction</Text>
+                                <Check color={colors.primaryInverse} size={20} />
+                                <Text style={[styles.saveText, { color: colors.primaryInverse }]}>{t('addTransaction.saveTransaction')}</Text>
                             </>
                         )}
                     </TouchableOpacity>
@@ -186,23 +215,23 @@ export default function AddTransactionScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#000' },
+    container: { flex: 1 },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
     iconBtn: { padding: 4 },
-    title: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+    title: { fontSize: 20, fontWeight: 'bold' },
 
     form: { padding: 24 },
     inputGroup: { marginBottom: 24 },
-    label: { color: '#94a3b8', marginBottom: 8, fontSize: 14 },
-    input: { backgroundColor: '#1e293b', color: '#fff', padding: 16, borderRadius: 12, fontSize: 16 },
+    label: { marginBottom: 8, fontSize: 14 },
+    input: { padding: 16, borderRadius: 12, fontSize: 16 },
 
-    typeRow: { flexDirection: 'row', marginBottom: 32, backgroundColor: '#1e293b', borderRadius: 12, padding: 4 },
+    typeRow: { flexDirection: 'row', marginBottom: 32, borderRadius: 12, padding: 4 },
     typeBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
-    typeText: { color: '#94a3b8', fontWeight: 'bold' },
+    typeText: { fontWeight: 'bold' },
     textWhite: { color: '#fff' },
     bgGreen: { backgroundColor: '#22c55e' },
     bgRed: { backgroundColor: '#ef4444' },
 
-    saveBtn: { backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, marginTop: 16 },
-    saveText: { color: '#000', fontWeight: 'bold', fontSize: 16, marginLeft: 8 }
+    saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, marginTop: 16 },
+    saveText: { fontWeight: 'bold', fontSize: 16, marginLeft: 8 }
 });

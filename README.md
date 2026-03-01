@@ -1,50 +1,72 @@
-# Welcome to your Expo app 👋
+# CryptoPortfolio
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Mobile crypto portfolio tracker built with Expo + React Native.
 
-## Get started
+## What It Does
+- Imports transaction history from CSV and stores it locally.
+- Recomputes holdings from transactions (single source of truth).
+- Fetches live prices and renders portfolio + per-coin charts for `1H/1D/1W/1M/1Y/ALL`.
+- Calculates cost basis, realized gains, and total gains per coin.
+- Exports transactions back to CSV.
 
+## Tech Stack
+- Expo SDK 54 / React Native 0.81 / React 19
+- Expo Router for navigation
+- `expo-sqlite` (native) and in-memory web DB adapter
+- `react-native-wagmi-charts` for line/candlestick graphs
+- Jest + React Native Testing Library
+
+## Project Structure
+- `app/`: Route screens (`/`, `/coin/[symbol]`, `/add-transaction`, `/settings`)
+- `src/db.native.js`, `src/db.web.js`: Data persistence layer
+- `src/csv.js`: CSV parsing/export and import validation report
+- `src/cryptoCompare.js`: Market data + FX conversion rates
+- `src/utils/transactionCalculations.js`: Cost basis and gain logic
+- `src/components/CryptoGraph.js`: Shared chart component
+
+## Data Model
+### `transactions`
+- `id`
+- `date_iso` (UTC ISO)
+- `way` (`BUY|SELL|DEPOSIT|WITHDRAW|RECEIVE|SEND`)
+- `symbol`
+- `amount`
+- `quote_amount`
+- `quote_currency`
+
+### `holdings`
+- `symbol`
+- `quantity`
+
+Holdings are recomputed from transactions after insert/update/delete to prevent drift.
+
+## Local Setup
 1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
 ```bash
-npm run reset-project
+npm install
+```
+2. Start dev server
+```bash
+npm run start
+```
+3. Android build/run
+```bash
+npm run android
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Quality Commands
+- Lint: `npm run lint`
+- Tests: `npm test -- --runInBand`
+- Generate branding assets: `npm run generate:brand-assets`
 
-## Learn more
+## CI/CD (GitHub Actions + Expo EAS)
+- `CI`: runs lint and tests on push/PR.
+- `EAS OTA Update`: publishes over-the-air updates to Expo EAS Update branch/channel.
+- `EAS Build And Submit`: builds Android/iOS release artifacts and can auto-submit to stores.
 
-To learn more about developing your project with Expo, look at the following resources:
+Detailed setup (secrets, credentials, release flow): see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Known Limitations
+- Chart/test runs can print React `act(...)` warnings from async effect timing in component tests (tests still pass).
+- FX conversion for mixed quote currencies depends on external rate availability; missing rates are treated as non-convertible for deterministic results.
+- Web DB is in-memory only (intended for development/testing).

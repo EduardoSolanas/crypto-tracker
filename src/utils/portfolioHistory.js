@@ -1,6 +1,7 @@
+import { toLinePoint } from './chartContracts';
+
 // Named constants for magic numbers
 const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
-const MAX_GRAPH_POINTS = 60;  // Maximum points to render on graph
 const MIN_QUANTITY = 0.00000001;  // Dust threshold for filtering tiny amounts
 
 export const computePortfolioHistory = async ({
@@ -10,8 +11,6 @@ export const computePortfolioHistory = async ({
     range,
     fetchCandles
 }) => {
-    const startTime = Date.now();
-
     // Default return definition
     const emptyResult = {
         chartData: [],
@@ -24,7 +23,7 @@ export const computePortfolioHistory = async ({
         const now = Date.now();
         return {
             ...emptyResult,
-            chartData: [{ timestamp: now - 86400000, value: 0 }, { timestamp: now, value: 0 }]
+            chartData: [toLinePoint(now - 86400000, 0), toLinePoint(now, 0)]
         };
     }
 
@@ -36,30 +35,92 @@ export const computePortfolioHistory = async ({
         });
     }
 
-    // --- 1. PARAMS & TIME POINTS (SIMPLIFIED) ---
-    // Using optimal point counts for better performance
+    // --- 1. PARAMS & TIME POINTS ---
+    // Find the earliest transaction date for ALL range
+    const sortedTxnDates = allTxns
+        .map(t => new Date(t.dateISO || t.date_iso).getTime())
+        .sort((a, b) => a - b);
+    const earliestTxnTime = sortedTxnDates[0] / 1000; // in seconds
+    
+    const nowSec = Math.floor(Date.now() / 1000);
+    
     let rLimit = 30;
     let rTimeframe = 'day';
+    let rAggregate = 1;
+    
     switch (range) {
-        case '1H': rTimeframe = 'minute'; rLimit = 30; break;  // 2 min intervals
-        case '1D': rTimeframe = 'hour'; rLimit = 24; break;  // Hourly (MAJOR OPTIMIZATION)
-        case '1W': rTimeframe = 'hour'; rLimit = 42; break;  // 4 hour intervals
-        case '1M': rTimeframe = 'day'; rLimit = 30; break;  // Daily
-        case '1Y': rTimeframe = 'day'; rLimit = 52; break;  // Weekly
-        case 'ALL': rTimeframe = 'day'; rLimit = 50; break;  // Adaptive
-        default: rTimeframe = 'day'; rLimit = 30;
+        case '1H': 
+            // 1h should use minute candles; hourly candles make this view stale/inaccurate.
+            rTimeframe = 'minute'; 
+            rLimit = 60;
+            rAggregate = 1;
+            break;
+        case '1D': 
+            rTimeframe = 'hour'; 
+            rLimit = 24; 
+            rAggregate = 1;
+            break;
+        case '1W': 
+            rTimeframe = 'hour'; 
+            // 7 days * 24h = 168h.
+            rLimit = 168;
+            rAggregate = 1;
+            break;
+        case '1M': 
+            rTimeframe = 'day'; 
+            rLimit = 30; 
+            rAggregate = 1;
+            break;
+        case '1Y': 
+            rTimeframe = 'day'; 
+            rLimit = 365; 
+            rAggregate = 1;
+            break;
+        case 'ALL': {
+            // Calculate days since first transaction
+            const daysSinceFirst = Math.ceil((nowSec - earliestTxnTime) / 86400);
+            rTimeframe = 'day';
+            // Use at least 30 days, cap at 2000 (API limit)
+            rLimit = Math.min(Math.max(daysSinceFirst, 30), 2000);
+            rAggregate = Math.max(1, Math.ceil(rLimit / 200));
+            break;
+        }
+        default: 
+            rTimeframe = 'day'; 
+            rLimit = 30;
+            rAggregate = 1;
     }
 
     let stepSeconds = 86400;
     if (rTimeframe === 'hour') stepSeconds = 3600;
     if (rTimeframe === 'minute') stepSeconds = 60;
+    stepSeconds *= rAggregate;
 
-    const nowSec = Math.floor(Date.now() / 1000);
     const gridNow = Math.floor(nowSec / stepSeconds) * stepSeconds;
 
-    // NO PERFORMANCE CAP NEEDED - all ranges now use optimal point counts
-    const simStep = stepSeconds;
-    const simLimit = rLimit;
+    // For 1H view, we want hourly data points but only show the last hour
+    let simStep = stepSeconds;
+    let simLimit = rLimit;
+    
+    if (range === '1H') {
+        // Show 12 data points over the last hour (5-minute intervals).
+        simLimit = 12;
+        simStep = 300; // 5 minute intervals for display
+    }
+    if (range === '1W') {
+        // Keep chart readable while still spanning the full week.
+        simStep = 7200; // 2-hour intervals
+        simLimit = 84;  // 7 days * 12 points/day
+    }
+
+    // For ALL and 1Y, sample data points to avoid too many
+    if (range === 'ALL' || range === '1Y') {
+        const targetPoints = 50;
+        if (rLimit > targetPoints) {
+            simStep = Math.floor((rLimit * 86400) / targetPoints);
+            simLimit = targetPoints;
+        }
+    }
 
     let timePoints = [];
     for (let i = simLimit; i >= 0; i--) {
@@ -76,12 +137,14 @@ export const computePortfolioHistory = async ({
         await Promise.all(
             symbolsToFetch.map(async (sym) => {
                 try {
-                    const data = await fetchCandles(sym, currency, rTimeframe, rLimit + 20);
+                    const data = await fetchCandles(sym, currency, rTimeframe, rLimit + 20, rAggregate);
                     if (data && data.length) data.sort((a, b) => a.time - b.time);
                     historyMap[sym] = data || [];
                 } catch (err) {
                     historyMap[sym] = [];
-                    console.error(`Error fetching history for ${sym}:`, err);
+                    if (globalThis.__DEV__) {
+                        console.error(`Error fetching history for ${sym}:`, err);
+                    }
                 }
             })
         );
@@ -130,11 +193,8 @@ export const computePortfolioHistory = async ({
                 val += qty * hist[ptr].close;
             }
         }
-        return { timestamp: tPoint * 1000, value: val };
+        return toLinePoint(tPoint * 1000, val);
     });
-
-    const endTime = Date.now();
-    // console.log(`[PERF] Graph Simulation: ${endTime - startTime}ms (${graphPoints.length} points)`);
 
     // --- 4. POST-PROCESS ---
     const firstActiveIndex = graphPoints.findIndex(p => p.value > 0.0001);

@@ -1,14 +1,20 @@
 // src/db.native.js
 import * as SQLite from 'expo-sqlite';
+import { computeHoldingsFromTxns } from './csv';
 
 let dbPromise;
+const debugLog = (...args) => {
+    if (globalThis.__DEV__) {
+        console.log(...args);
+    }
+};
 
 /**
  * Open (or reuse) the SQLite database.
  */
 async function getDb() {
     if (!dbPromise) {
-        console.log('[DB][native] opening database');
+        debugLog('[DB][native] opening database');
         dbPromise = SQLite.openDatabaseAsync('portfolio.db');
     }
     return dbPromise;
@@ -19,7 +25,7 @@ async function getDb() {
  * Called once on app startup.
  */
 export async function initDb() {
-    console.log('[DB][native] initDb');
+    debugLog('[DB][native] initDb');
     const db = await getDb();
 
     await db.execAsync(`
@@ -55,7 +61,7 @@ export async function initDb() {
     );
   `);
 
-    console.log('[DB][native] schema ready');
+    debugLog('[DB][native] schema ready');
 }
 
 /* ---------------- META ---------------- */
@@ -84,18 +90,19 @@ export async function getMeta(key) {
 /* ---------------- RESET ---------------- */
 
 export async function clearAllData() {
-    console.log('[DB][native] clearAllData');
+    debugLog('[DB][native] clearAllData');
     const db = await getDb();
     await db.execAsync(`
         DELETE FROM transactions;
         DELETE FROM holdings;
+        DELETE FROM meta WHERE key = 'cache';
     `);
 }
 
 /* ---------------- TRANSACTIONS ---------------- */
 
 export async function insertTransactions(txns) {
-    console.log('[DB][native] insertTransactions:', txns.length);
+    debugLog('[DB][native] insertTransactions:', txns.length);
     const db = await getDb();
 
     await db.execAsync('BEGIN;');
@@ -124,6 +131,7 @@ export async function insertTransactions(txns) {
             );
         }
         await db.execAsync('COMMIT;');
+        await syncAllHoldingsFromTransactions();
     } catch (e) {
         await db.execAsync('ROLLBACK;');
         throw e;
@@ -131,9 +139,10 @@ export async function insertTransactions(txns) {
 }
 
 export async function deleteTransaction(id) {
-    console.log('[DB][native] deleteTransaction:', id);
+    debugLog('[DB][native] deleteTransaction:', id);
     const db = await getDb();
     await db.runAsync(`DELETE FROM transactions WHERE id = ?`, [id]);
+    await syncAllHoldingsFromTransactions();
 }
 
 export async function getTransactionById(id) {
@@ -142,7 +151,7 @@ export async function getTransactionById(id) {
 }
 
 export async function updateTransaction(id, t) {
-    console.log('[DB][native] updateTransaction:', id);
+    debugLog('[DB][native] updateTransaction:', id);
     const db = await getDb();
     await db.runAsync(
         `
@@ -160,6 +169,7 @@ export async function updateTransaction(id, t) {
             id
         ]
     );
+    await syncAllHoldingsFromTransactions();
 }
 
 export async function listTransactionsBySymbol(symbol) {
@@ -189,7 +199,7 @@ export async function getAllTransactions() {
 /* ---------------- HOLDINGS ---------------- */
 
 export async function upsertHoldings(holdingsMap) {
-    console.log('[DB][native] upsertHoldings:', holdingsMap);
+    debugLog('[DB][native] upsertHoldings:', holdingsMap);
     const db = await getDb();
 
     await db.execAsync('BEGIN;');
@@ -238,7 +248,7 @@ export async function getHoldingsMap() {
 }
 
 export async function syncHoldingsForSymbol(symbol) {
-    console.log('[DB][native] syncHoldingsForSymbol:', symbol);
+    debugLog('[DB][native] syncHoldingsForSymbol:', symbol);
     const db = await getDb();
 
     // Calculate new quantity directly in SQL for speed
@@ -267,6 +277,18 @@ export async function syncHoldingsForSymbol(symbol) {
     }
     await upsertHoldings(holdings);
     return newQty;
+}
+
+export async function syncAllHoldingsFromTransactions() {
+    const allTxns = await getAllTransactions();
+    const normalized = allTxns.map((t) => ({
+        symbol: t.symbol,
+        amount: Number(t.amount || 0),
+        way: String(t.way || '').toUpperCase(),
+    }));
+    const holdings = computeHoldingsFromTxns(normalized);
+    await upsertHoldings(holdings);
+    return holdings;
 }
 
 /* ---------------- CACHE ---------------- */

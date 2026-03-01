@@ -66,7 +66,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 50);  // 30 + buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 80, 1);  // 60 + 20 buffer
             expect(result.chartData.length).toBeGreaterThan(0);
             expect(result.chartData.length).toBeLessThanOrEqual(32); // Max 30 minutes + buffer
         });
@@ -124,7 +124,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'USD', 'hour', 44);  // 24 + buffer (now hourly!)
+            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'USD', 'hour', 44, 1);  // 24 + 20 buffer
         });
 
         it('handles multiple transactions within 24 hours', async () => {
@@ -187,7 +187,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 62);  // 42 + buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 188, 1);  // 168 + 20 buffer
         });
 
         it('tracks portfolio value changes over a week', async () => {
@@ -243,7 +243,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 50);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 50, 1);  // 30 + 20 buffer
         });
 
         it('handles buy and sell transactions over a month', async () => {
@@ -336,7 +336,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 72);  // 52 + buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 385, 1);  // 365 + 20 buffer
         });
 
         it('caps data points at ~100 for performance', async () => {
@@ -419,7 +419,8 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 70);  // 50 + buffer
+            // For ALL range: daysSinceFirst = 1000 days, capped at 2000, so rLimit = 1000 + 20 buffer = 1020
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 1020, 5);
         });
 
         it('handles entire portfolio history from first transaction', async () => {

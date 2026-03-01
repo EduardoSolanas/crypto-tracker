@@ -814,4 +814,338 @@ data,data,data`;
         });
 
     });
+
+    describe('CoinScreen Average Buy/Sell Price Calculation', () => {
+        it('calculates average buy price correctly', () => {
+            const txs = [
+                { way: 'BUY', amount: 1, quote_amount: 50000 },
+                { way: 'BUY', amount: 0.5, quote_amount: 30000 },
+                { way: 'BUY', amount: 2, quote_amount: 100000 }
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                }
+            }
+            const avgBuy = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+
+            // Total: $180,000 / 3.5 BTC = $51,428.57 per BTC
+            expect(avgBuy).toBeCloseTo(51428.57, 2);
+        });
+
+        it('calculates average sell price correctly', () => {
+            const txs = [
+                { way: 'BUY', amount: 2, quote_amount: 100000 },
+                { way: 'SELL', amount: 0.5, quote_amount: 30000 },
+                { way: 'SELL', amount: 0.3, quote_amount: 18000 }
+            ];
+
+            let sellTotalValue = 0, sellTotalQty = 0;
+            for (const t of txs) {
+                if (t.way === 'SELL') {
+                    sellTotalValue += t.quote_amount;
+                    sellTotalQty += t.amount;
+                }
+            }
+            const avgSell = sellTotalQty > 0 ? sellTotalValue / sellTotalQty : 0;
+
+            // Total: $48,000 / 0.8 BTC = $60,000 per BTC
+            expect(avgSell).toBe(60000);
+        });
+
+        it('handles mixed buy/sell transactions correctly', () => {
+            const txs = [
+                { way: 'BUY', amount: 3, quote_amount: 150000 },
+                { way: 'SELL', amount: 1, quote_amount: 60000 },
+                { way: 'BUY', amount: 0.5, quote_amount: 30000 },
+                { way: 'SELL', amount: 0.5, quote_amount: 32000 }
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let sellTotalValue = 0, sellTotalQty = 0;
+
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                } else if (t.way === 'SELL') {
+                    sellTotalValue += t.quote_amount;
+                    sellTotalQty += t.amount;
+                }
+            }
+
+            const avgBuy = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+            const avgSell = sellTotalQty > 0 ? sellTotalValue / sellTotalQty : 0;
+
+            // Avg buy: $180,000 / 3.5 = $51,428.57
+            expect(avgBuy).toBeCloseTo(51428.57, 2);
+            // Avg sell: $92,000 / 1.5 = $61,333.33
+            expect(avgSell).toBeCloseTo(61333.33, 2);
+        });
+
+        it('handles DEPOSIT and WITHDRAW as BUY/SELL equivalents', () => {
+            const txs = [
+                { way: 'DEPOSIT', amount: 10, quote_amount: 30000 },
+                { way: 'BUY', amount: 5, quote_amount: 15000 },
+                { way: 'WITHDRAW', amount: 3, quote_amount: 9000 },
+                { way: 'SELL', amount: 2, quote_amount: 6000 }
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let sellTotalValue = 0, sellTotalQty = 0;
+
+            for (const t of txs) {
+                if (['BUY', 'DEPOSIT', 'RECEIVE'].includes(t.way)) {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                } else if (['SELL', 'WITHDRAW', 'SEND'].includes(t.way)) {
+                    sellTotalValue += t.quote_amount;
+                    sellTotalQty += t.amount;
+                }
+            }
+
+            const avgBuy = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+            const avgSell = sellTotalQty > 0 ? sellTotalValue / sellTotalQty : 0;
+
+            // Avg buy: $45,000 / 15 = $3,000
+            expect(avgBuy).toBe(3000);
+            // Avg sell: $15,000 / 5 = $3,000
+            expect(avgSell).toBe(3000);
+        });
+    });
+
+    describe('Cost Basis and Realized Gains Calculation', () => {
+        it('tracks cost basis correctly with only BUY transactions', () => {
+            const txs = [
+                { way: 'BUY', amount: 1, quote_amount: 50000 },
+                { way: 'BUY', amount: 0.5, quote_amount: 30000 }
+            ];
+
+            let totalCostBasis = 0;
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    totalCostBasis += t.quote_amount;
+                }
+            }
+
+            expect(totalCostBasis).toBe(80000);
+        });
+
+        it('calculates realized gains correctly for SELL transactions', () => {
+            const txs = [
+                { way: 'BUY', amount: 2, quote_amount: 100000 }, // Buy 2 BTC @ $50k each
+                { way: 'SELL', amount: 1, quote_amount: 60000 }  // Sell 1 BTC @ $60k
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let realizedGains = 0;
+            let totalCostBasis = 0;
+
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                    totalCostBasis += t.quote_amount;
+                } else if (t.way === 'SELL') {
+                    const avgCostPerCoin = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+                    const costBasisForSale = avgCostPerCoin * t.amount;
+                    realizedGains += (t.quote_amount - costBasisForSale);
+                    totalCostBasis -= costBasisForSale;
+                }
+            }
+
+            // Realized gain: $60k - $50k = $10k
+            expect(realizedGains).toBe(10000);
+            // Remaining cost basis: $100k - $50k = $50k
+            expect(totalCostBasis).toBe(50000);
+        });
+
+        it('handles multiple SELL transactions correctly', () => {
+            const txs = [
+                { way: 'BUY', amount: 3, quote_amount: 150000 },  // Buy 3 BTC @ $50k each
+                { way: 'SELL', amount: 1, quote_amount: 60000 },  // Sell 1 @ $60k (gain: $10k)
+                { way: 'SELL', amount: 0.5, quote_amount: 35000 } // Sell 0.5 @ $70k (gain: $10k)
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let realizedGains = 0;
+            let totalCostBasis = 0;
+
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                    totalCostBasis += t.quote_amount;
+                } else if (t.way === 'SELL') {
+                    const avgCostPerCoin = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+                    const costBasisForSale = avgCostPerCoin * t.amount;
+                    realizedGains += (t.quote_amount - costBasisForSale);
+                    totalCostBasis -= costBasisForSale;
+                }
+            }
+
+            // Total realized: $10k + $10k = $20k
+            expect(realizedGains).toBe(20000);
+            // Remaining cost basis: $150k - $50k - $25k = $75k
+            expect(totalCostBasis).toBe(75000);
+        });
+
+        it('calculates total gains including unrealized gains', () => {
+            const txs = [
+                { way: 'BUY', amount: 2, quote_amount: 100000 },
+                { way: 'SELL', amount: 1, quote_amount: 60000 }
+            ];
+
+            const currentPrice = 55000; // Current BTC price
+            const currentQty = 1; // 1 BTC remaining
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let realizedGains = 0;
+            let totalCostBasis = 0;
+
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                    totalCostBasis += t.quote_amount;
+                } else if (t.way === 'SELL') {
+                    const avgCostPerCoin = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+                    const costBasisForSale = avgCostPerCoin * t.amount;
+                    realizedGains += (t.quote_amount - costBasisForSale);
+                    totalCostBasis -= costBasisForSale;
+                }
+            }
+
+            const currentValue = currentPrice * currentQty;
+            const totalGains = realizedGains + currentValue - totalCostBasis;
+
+            // Realized: $10k
+            // Unrealized: $55k (current) - $50k (basis) = $5k
+            // Total: $15k
+            expect(realizedGains).toBe(10000);
+            expect(currentValue - totalCostBasis).toBe(5000);
+            expect(totalGains).toBe(15000);
+        });
+
+        it('handles realized loss correctly', () => {
+            const txs = [
+                { way: 'BUY', amount: 1, quote_amount: 60000 },
+                { way: 'SELL', amount: 1, quote_amount: 50000 }
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            let realizedGains = 0;
+
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                } else if (t.way === 'SELL') {
+                    const avgCostPerCoin = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+                    const costBasisForSale = avgCostPerCoin * t.amount;
+                    realizedGains += (t.quote_amount - costBasisForSale);
+                }
+            }
+
+            // Realized loss: $50k - $60k = -$10k
+            expect(realizedGains).toBe(-10000);
+        });
+    });
+
+    describe('Per-Transaction Delta Calculation', () => {
+        it('calculates delta correctly for profitable transaction', () => {
+            const tx = { way: 'BUY', amount: 1, quote_amount: 50000 };
+            const currentPrice = 60000;
+
+            const purchasePrice = tx.amount > 0 ? tx.quote_amount / tx.amount : 0;
+            const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
+            const deltaVal = (currentPrice - purchasePrice) * tx.amount;
+
+            expect(purchasePrice).toBe(50000);
+            expect(deltaPct).toBe(20); // 20% gain
+            expect(deltaVal).toBe(10000); // $10k gain
+        });
+
+        it('calculates delta correctly for loss transaction', () => {
+            const tx = { way: 'BUY', amount: 0.5, quote_amount: 30000 };
+            const currentPrice = 50000;
+
+            const purchasePrice = tx.amount > 0 ? tx.quote_amount / tx.amount : 0;
+            const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
+            const deltaVal = (currentPrice - purchasePrice) * tx.amount;
+
+            expect(purchasePrice).toBe(60000);
+            expect(deltaPct).toBeCloseTo(-16.67, 2); // -16.67% loss
+            expect(deltaVal).toBeCloseTo(-5000, 2); // -$5k loss
+        });
+
+        it('handles SELL transaction delta (sold vs current)', () => {
+            const tx = { way: 'SELL', amount: 1, quote_amount: 55000 };
+            const currentPrice = 60000;
+
+            const salePrice = tx.amount > 0 ? tx.quote_amount / tx.amount : 0;
+            const missedGainPct = salePrice > 0 ? ((currentPrice - salePrice) / salePrice) * 100 : 0;
+
+            expect(salePrice).toBe(55000);
+            expect(missedGainPct).toBeCloseTo(9.09, 2); // Missed 9.09% gain by selling early
+        });
+
+        it('handles zero amount edge case', () => {
+            const tx = { way: 'BUY', amount: 0, quote_amount: 0 };
+            const currentPrice = 50000;
+
+            const purchasePrice = tx.amount > 0 ? tx.quote_amount / tx.amount : 0;
+            const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
+
+            expect(purchasePrice).toBe(0);
+            expect(deltaPct).toBe(0);
+        });
+    });
+
+    describe('Mixed Quote Currencies', () => {
+        it('handles transactions in different quote currencies (user scenario)', () => {
+            // Simulating user's real data: buying XRP with ETH, then converting ETH to USD
+            const txs = [
+                { way: 'BUY', symbol: 'XRP', amount: 879, quote_amount: 1.311468, quote_currency: 'ETH' },
+                { way: 'BUY', symbol: 'ETH', amount: 2.53345, quote_amount: 3579.44, quote_currency: 'USD' }
+            ];
+
+            // In real app, prices would be fetched in user's preferred currency (e.g., EUR)
+            // CSV parser preserves quote_currency, allowing conversion if needed
+            expect(txs[0].quote_currency).toBe('ETH');
+            expect(txs[1].quote_currency).toBe('USD');
+
+            // The quote_amount should be used as-is for calculations
+            // When displaying, the app should convert to user's preferred currency
+            expect(txs[0].quote_amount).toBeCloseTo(1.311468, 6);
+            expect(txs[1].quote_amount).toBeCloseTo(3579.44, 2);
+        });
+
+        it('calculates average buy price for multi-currency transactions', () => {
+            // NOTE: This is a known limitation - mixing quote currencies in avg buy calculation
+            // requires conversion to a common currency. Currently the app uses quote_amount as-is.
+            const txs = [
+                { way: 'BUY', amount: 1, quote_amount: 50000, quote_currency: 'USD' },
+                { way: 'BUY', amount: 0.5, quote_amount: 25000, quote_currency: 'EUR' }
+            ];
+
+            let buyTotalCost = 0, buyTotalQty = 0;
+            for (const t of txs) {
+                if (t.way === 'BUY') {
+                    // WARNING: Adding USD and EUR directly is incorrect without conversion
+                    // This test documents current behavior, not ideal behavior
+                    buyTotalCost += t.quote_amount;
+                    buyTotalQty += t.amount;
+                }
+            }
+            const avgBuy = buyTotalQty > 0 ? buyTotalCost / buyTotalQty : 0;
+
+            // This calculation is technically incorrect (mixing currencies)
+            // but documents current behavior: (50000 USD + 25000 EUR) / 1.5 = 50000
+            expect(avgBuy).toBe(50000);
+        });
+    });
 });

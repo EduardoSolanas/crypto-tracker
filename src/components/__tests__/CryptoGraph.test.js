@@ -1,15 +1,11 @@
 import { render } from '@testing-library/react-native';
 
-jest.mock('expo-haptics', () => ({
-    impactAsync: jest.fn(),
-    ImpactFeedbackStyle: { Light: 'light' },
-}));
-
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
     const { View, Text } = require('react-native');
 
-    const MockView = ({ children }) => React.createElement(View, null, children);
+    const MockView = ({ children, pointerEvents, ...props }) => 
+        React.createElement(View, { ...props, pointerEvents }, children);
     const MockText = ({ style, children }) => React.createElement(Text, { style }, children);
 
     function LineChartComponent({ children }) {
@@ -17,17 +13,17 @@ jest.mock('react-native-wagmi-charts', () => {
     }
     LineChartComponent.Provider = MockView;
     LineChartComponent.Path = () => null;
-    LineChartComponent.CursorCrosshair = () => null;
-    LineChartComponent.PriceText = MockText;
+    LineChartComponent.CursorCrosshair = () => React.createElement(View, { testID: 'cursor-crosshair' });
+    LineChartComponent.PriceText = () => React.createElement(Text, { testID: 'price-text' }, 'Price');
 
     function CandlestickChartComponent({ children }) {
         return React.createElement(View, { testID: 'candlestick-chart' }, children);
     }
     CandlestickChartComponent.Provider = MockView;
     CandlestickChartComponent.Candles = () => null;
-    CandlestickChartComponent.Crosshair = () => null;
-    CandlestickChartComponent.PriceText = MockText;
-    CandlestickChartComponent.DatetimeText = MockText;
+    CandlestickChartComponent.Crosshair = () => React.createElement(View, { testID: 'crosshair' });
+    CandlestickChartComponent.PriceText = () => React.createElement(Text, { testID: 'candle-price-text' }, 'Price');
+    CandlestickChartComponent.DatetimeText = () => React.createElement(Text, { testID: 'datetime-text' }, 'Date');
 
     return {
         LineChart: LineChartComponent,
@@ -47,6 +43,109 @@ describe('CryptoGraph', () => {
         it('renders null when data is undefined', () => {
             const { queryByTestId } = render(<CryptoGraph data={undefined} />);
             expect(queryByTestId('line-chart')).toBeNull();
+        });
+    });
+
+    describe('Interaction Disabled', () => {
+        it('line chart has pointerEvents="none" to disable touch interactions', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, value: 50000 },
+                { timestamp: Date.now(), value: 52000 }
+            ];
+
+            const { UNSAFE_root } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            // Find the root View that wraps the chart
+            const rootView = UNSAFE_root.findByProps({ pointerEvents: 'none' });
+            expect(rootView).toBeTruthy();
+        });
+
+        it('line chart does not render CursorCrosshair component', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, value: 50000 },
+                { timestamp: Date.now(), value: 52000 }
+            ];
+
+            const { queryByTestId } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            // CursorCrosshair should not be rendered
+            expect(queryByTestId('cursor-crosshair')).toBeNull();
+        });
+
+        it('line chart does not render PriceText component', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, value: 50000 },
+                { timestamp: Date.now(), value: 52000 }
+            ];
+
+            const { queryByTestId } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            // PriceText should not be rendered
+            expect(queryByTestId('price-text')).toBeNull();
+        });
+
+        it('line chart shows only top and bottom Y-axis labels', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, value: 50000 },
+                { timestamp: Date.now(), value: 52000 }
+            ];
+
+            const { queryAllByTestId } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            expect(queryAllByTestId('graph-y-max')).toHaveLength(1);
+            expect(queryAllByTestId('graph-y-min')).toHaveLength(1);
+        });
+
+        it('candlestick chart has pointerEvents="none" to disable touch interactions', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, open: 48000, high: 52000, low: 47000, close: 51000 },
+                { timestamp: Date.now(), open: 51000, high: 53000, low: 50000, close: 52500 }
+            ];
+
+            const { UNSAFE_root } = render(
+                <CryptoGraph type="candle" data={mockData} currency="USD" />
+            );
+
+            // Find the root View that wraps the chart
+            const rootView = UNSAFE_root.findByProps({ pointerEvents: 'none' });
+            expect(rootView).toBeTruthy();
+        });
+
+        it('candlestick chart does not render Crosshair component', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, open: 48000, high: 52000, low: 47000, close: 51000 },
+                { timestamp: Date.now(), open: 51000, high: 53000, low: 50000, close: 52500 }
+            ];
+
+            const { queryByTestId } = render(
+                <CryptoGraph type="candle" data={mockData} currency="USD" />
+            );
+
+            // Crosshair should not be rendered
+            expect(queryByTestId('crosshair')).toBeNull();
+        });
+
+        it('candlestick chart does not render interactive PriceText and DatetimeText', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, open: 48000, high: 52000, low: 47000, close: 51000 },
+                { timestamp: Date.now(), open: 51000, high: 53000, low: 50000, close: 52500 }
+            ];
+
+            const { queryByTestId } = render(
+                <CryptoGraph type="candle" data={mockData} currency="USD" />
+            );
+
+            // Interactive elements should not be rendered
+            expect(queryByTestId('candle-price-text')).toBeNull();
+            expect(queryByTestId('datetime-text')).toBeNull();
         });
     });
 

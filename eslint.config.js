@@ -7,4 +7,26 @@ module.exports = defineConfig([
   {
     ignores: ['dist/*'],
   },
+  {
+    files: ['**/*.test.js', '**/__tests__/**/*.js'],
+    languageOptions: {
+      globals: {
+        jest: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+      },
+    },
+    rules: {
+      'react/display-name': 'off',
+    },
+  },
+  {
+    files: ['**/__mocks__/**/*.js'],
+    rules: {
+      'react/display-name': 'off',
+    },
+  },
 ]);

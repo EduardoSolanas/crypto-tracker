@@ -2,11 +2,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { router } from 'expo-router';
 import { Plus, Settings, TrendingUp } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Dimensions,
     RefreshControl,
     ScrollView,
     StatusBar,
@@ -16,27 +16,33 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CoinIcon from '../components/CoinIcon';
 import CryptoGraph from '../components/CryptoGraph';
-import { fetchPortfolioPrices } from '../cryptoCompare';
-import { computeHoldingsFromTxns, parseDeltaCsvToTxns } from '../csv';
-import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, loadCache, saveCache, setMeta, upsertHoldings } from '../db';
-
-const log = (...args) => {
-    // console.log('[UPLOAD]', ...args);
-};
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
-
-// Cache expiration times
-const CACHE_MAJOR = 10 * 60 * 1000;  // 10 minutes for assets > $10
-const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
-
+import { fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
+import { computeHoldingsFromTxns, parseDeltaCsvWithReport } from '../csv';
+import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, loadCache, saveCache } from '../db';
 import { formatMoney } from '../utils/format';
 import { computePortfolioHistory } from '../utils/portfolioHistory';
 import { useTheme } from '../utils/theme';
 
+// Cache expiration times
+const CACHE_MAJOR = 10 * 60 * 1000;  // 10 minutes for assets > $10
+const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
+const debugLog = (...args) => {
+    if (globalThis.__DEV__) {
+        console.log(...args);
+    }
+};
+
 export default function HomeScreen() {
     const { colors, isDark } = useTheme();
+    const { t } = useTranslation();
+    const tr = useCallback((key, fallback, options) => {
+        const value = t(key, options);
+        if (typeof value !== 'string') return fallback;
+        if (value === key || value.endsWith(key)) return fallback;
+        return value;
+    }, [t]);
     const [booting, setBooting] = useState(true);
     const [loading, setLoading] = useState(false);
     const [currency, setCurrency] = useState('EUR');
@@ -44,17 +50,33 @@ export default function HomeScreen() {
     const [chartData, setChartData] = useState([]);
     const [range, setRange] = useState('1D'); // Default range
     const [graphLoading, setGraphLoading] = useState(false);
+    const [graphError, setGraphError] = useState('');
     const [chartColor, setChartColor] = useState('#22c55e');
     const [delta, setDelta] = useState({ val: 0, pct: 0 });
+    const didBootstrapRef = useRef(false);
 
     const totalValue = useMemo(
         () => (portfolio ? portfolio.reduce((acc, c) => acc + c.value, 0) : 0),
         [portfolio]
     );
 
+    const getEffectiveHoldings = useCallback(async () => {
+        const allTxns = await getAllTransactions();
+        if (allTxns.length > 0) {
+            return computeHoldingsFromTxns(
+                allTxns.map(t => ({
+                    symbol: t.symbol,
+                    amount: t.amount,
+                    way: t.way,
+                }))
+            );
+        }
+        return getHoldingsMap();
+    }, []);
+
 
     // Helper: Smart Fetch
-    const smartFetchPortfolio = async (holdingsMap, cachedPortfolio, savedTimestamp) => {
+    const smartFetchPortfolio = useCallback(async (holdingsMap, cachedPortfolio, savedTimestamp) => {
         const now = Date.now();
         const symbols = Object.keys(holdingsMap);
         const toFetch = [];
@@ -97,7 +119,7 @@ export default function HomeScreen() {
 
         if (toFetch.length === 0) return kept;
 
-        console.log(`[SmartFetch] Fetching ${toFetch.length} items (Cached: ${kept.length})`);
+        debugLog(`[SmartFetch] Fetching ${toFetch.length} items (Cached: ${kept.length})`);
 
         // Fetch only needed subset
         const subsetMap = {};
@@ -109,21 +131,18 @@ export default function HomeScreen() {
         const merged = [...kept, ...newItems];
         merged.sort((a, b) => b.value - a.value);
         return merged;
-    };
+    }, [currency]);
 
     // Compute History with dynamic range support
-    const computeHistory = async (allTxns, currentPortfolio, currency, selectedRange) => {
+    const computeHistory = useCallback(async (allTxns, currentPortfolio, selectedCurrency, selectedRange) => {
         try {
             setGraphLoading(true);
-
-            // Dynamically import fetchCandles to avoid circular dependency issues if any
-            // though standard import at top is usually fine, complying with existing style
-            const { fetchCandles } = await import('../cryptoCompare');
+            setGraphError('');
 
             const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
                 allTxns,
                 currentPortfolio,
-                currency,
+                currency: selectedCurrency,
                 range: selectedRange,
                 fetchCandles
             });
@@ -138,28 +157,30 @@ export default function HomeScreen() {
             }
 
         } catch (e) {
-            console.error('[computeHistory] Error', e);
+            if (globalThis.__DEV__) console.error('[computeHistory] Error', e);
+            setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
         } finally {
             setGraphLoading(false);
         }
-    };
-    // Effect to reload when range changes, BUT only if we have portfolio data
+    }, [tr]);
+    // Recompute graph whenever range/currency/portfolio changes.
     useEffect(() => {
-        if (portfolio) {
-            getAllTransactions().then(txs => {
-                computeHistory(txs, portfolio, currency, range);
-            });
-        }
-    }, [range, portfolio, currency]); // Trigger on range, portfolio, or currency change
+        if (!portfolio) return;
+        getAllTransactions().then((txs) => {
+            computeHistory(txs, portfolio, currency, range);
+        });
+    }, [computeHistory, currency, portfolio, range]);
 
     useEffect(() => {
+        if (didBootstrapRef.current) return;
+        didBootstrapRef.current = true;
         (async () => {
             try {
                 await initDb();
                 const savedCurrency = await getMeta('currency');
                 if (savedCurrency) setCurrency(savedCurrency);
 
-                const holdings = await getHoldingsMap();
+                const holdings = await getEffectiveHoldings();
                 const cached = await loadCache();
 
                 // Boot: Try smart fetch (which respects timeouts)
@@ -178,21 +199,21 @@ export default function HomeScreen() {
                     setChartData(loaded.chartData);
                     setDelta(loaded.delta);
                     setRange(loaded.range);
-                    Alert.alert('Offline Mode', 'Using cached data (API Limit / Network).');
+                    Alert.alert(tr('home.offlineModeTitle', 'Offline Mode'), tr('home.offlineModeMessage', 'Using cached data (API Limit / Network).'));
                 } else {
                     if (e.message && e.message.includes('Rate Limit')) {
-                        Alert.alert('API Limit', 'Rate limit reached. Please wait.');
+                        Alert.alert(tr('home.apiLimitTitle', 'API Limit'), tr('home.apiLimitMessage', 'Rate limit reached. Please wait.'));
                     } else if (e.message && e.message.includes('Type 99')) {
-                        Alert.alert('API Limit', 'Rate limit reached. Please wait.');
+                        Alert.alert(tr('home.apiLimitTitle', 'API Limit'), tr('home.apiLimitMessage', 'Rate limit reached. Please wait.'));
                     } else {
-                        Alert.alert('Error', e.message);
+                        Alert.alert(tr('general.error', 'Error'), e.message);
                     }
                 }
             } finally {
                 setBooting(false);
             }
         })();
-    }, []);
+    }, [computeHistory, currency, getEffectiveHoldings, smartFetchPortfolio, tr]);
 
     const pickAndImportCsv = async () => {
         let result;
@@ -202,7 +223,7 @@ export default function HomeScreen() {
                 copyToCacheDirectory: true,
             });
         } catch (e) {
-            Alert.alert('Picker error', String(e));
+            Alert.alert(tr('home.pickerErrorTitle', 'Picker error'), String(e));
             return;
         }
 
@@ -220,24 +241,27 @@ export default function HomeScreen() {
                 text = await res.text();
             }
 
-            const txns = parseDeltaCsvToTxns(text);
+            const { txns, report } = parseDeltaCsvWithReport(text);
             if (!txns.length) {
-                Alert.alert('Parse error', 'No transactions found');
+                Alert.alert(tr('home.parseErrorTitle', 'Parse error'), tr('home.parseErrorMessage', 'No transactions found'));
                 return;
             }
 
             await clearAllData();
             await insertTransactions(txns);
-            const holdings = computeHoldingsFromTxns(txns);
-            await upsertHoldings(holdings);
+            const holdings = await getHoldingsMap();
 
             const p = await fetchPortfolioPrices(holdings, currency);
+            const allTxns = await getAllTransactions();
             setPortfolio(p);
-            computeHistory(txns, p, currency, range);
+            computeHistory(allTxns, p, currency, range);
 
-            Alert.alert('Import complete', `Imported ${txns.length} transactions`);
+            Alert.alert(
+                tr('home.importCompleteTitle', 'Import complete'),
+                tr('home.importCompleteMessage', `Imported: ${report.imported}\nSkipped: ${report.skipped}`, { imported: report.imported, skipped: report.skipped })
+            );
         } catch (e) {
-            Alert.alert('Import error', e?.message ?? String(e));
+            Alert.alert(tr('home.importErrorTitle', 'Import error'), e?.message ?? String(e));
         } finally {
             setLoading(false);
         }
@@ -246,7 +270,7 @@ export default function HomeScreen() {
     const refreshPrices = async () => {
         setLoading(true);
         try {
-            const holdings = await getHoldingsMap();
+            const holdings = await getEffectiveHoldings();
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
             setPortfolio(p);
@@ -257,38 +281,12 @@ export default function HomeScreen() {
                 setPortfolio(cached.portfolio);
                 setChartData(cached.chartData);
                 setDelta(cached.delta);
-                Alert.alert('Offline', 'Using cached data (API Error)');
+                Alert.alert(tr('home.offlineTitle', 'Offline'), tr('home.offlineMessage', 'Using cached data (API Error)'));
             } else {
-                Alert.alert('Refresh Error', e?.message ?? String(e));
+                Alert.alert(tr('home.refreshErrorTitle', 'Refresh Error'), e?.message ?? String(e));
             }
         } finally {
             setLoading(false);
-        }
-    };
-
-    const wipeDb = async () => {
-        setLoading(true);
-        try {
-            await clearAllData();
-            setPortfolio(null);
-        } catch (e) {
-            Alert.alert('Error', e?.message ?? String(e));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const setCurrencyAndReload = async (c) => {
-        setCurrency(c);
-        await setMeta('currency', c);
-        const holdings = await getHoldingsMap();
-        const p = await fetchPortfolioPrices(holdings, c);
-        if (Object.keys(holdings).length) {
-            setPortfolio(p);
-            computeHistory(holdings, p, c, range);
-        } else {
-            setPortfolio(null);
-            setChartData([]);
         }
     };
 
@@ -321,10 +319,10 @@ export default function HomeScreen() {
                 <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
                 <View style={[styles.centerContent]}>
                     <TrendingUp color={colors.text} size={48} />
-                    <Text style={[styles.title, { color: colors.text }]}>Portfolio</Text>
-                    <Text style={[styles.subtitle, { color: colors.textSecondary }]}>No data. Import CSV.</Text>
+                    <Text style={[styles.title, { color: colors.text }]}>{tr('home.portfolio', 'Portfolio')}</Text>
+                    <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{tr('home.noData', 'No data. Import CSV.')}</Text>
                     <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.primary }]} onPress={pickAndImportCsv} disabled={loading}>
-                        {loading ? <ActivityIndicator color={colors.primaryInverse} /> : <Text style={[styles.uploadBtnText, { color: colors.primaryInverse }]}>Import CSV</Text>}
+                        {loading ? <ActivityIndicator color={colors.primaryInverse} /> : <Text style={[styles.uploadBtnText, { color: colors.primaryInverse }]}>{tr('home.importCsv', 'Import CSV')}</Text>}
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -341,15 +339,10 @@ export default function HomeScreen() {
             >
                 <View style={[styles.header, { paddingTop: 60 }]}>
                     <View>
-                        <Text style={[styles.subTitle, { color: colors.textSecondary }]}>Total Worth</Text>
-                        <TouchableOpacity onPress={() => {
-                            const next = currency === 'EUR' ? 'GBP' : currency === 'GBP' ? 'USD' : 'EUR';
-                            setCurrencyAndReload(next);
-                        }}>
-                            <Text style={[styles.totalText, { color: colors.text }]}>
-                                {formatMoney(totalValue, currency)}
-                            </Text>
-                        </TouchableOpacity>
+                        <Text style={[styles.subTitle, { color: colors.textSecondary }]}>{tr('home.totalWorth', 'Total Worth')}</Text>
+                        <Text style={[styles.totalText, { color: colors.text }]}>
+                            {formatMoney(totalValue, currency)}
+                        </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                             <Text style={{
                                 color: delta.val >= 0 ? colors.success : colors.error,
@@ -392,6 +385,17 @@ export default function HomeScreen() {
                         height={220}
                         color={chartColor}
                     />
+                    {!!graphError && (
+                        <View style={{ alignItems: 'center', marginTop: 12 }}>
+                            <Text style={{ color: colors.error, fontSize: 12, marginBottom: 8 }}>{graphError}</Text>
+                            <TouchableOpacity
+                                onPress={refreshPrices}
+                                style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.surfaceElevated }}
+                            >
+                                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{tr('general.retry', 'Retry')}</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                     {/* Range Selector */}
                     <View style={{
                         flexDirection: 'row',
@@ -427,7 +431,7 @@ export default function HomeScreen() {
 
                 {/* ASSETS LIST */}
                 <View style={{ paddingHorizontal: 16 }}>
-                    <Text style={{ color: colors.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>Assets</Text>
+                    <Text style={{ color: colors.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>{tr('home.assets', 'Assets')}</Text>
 
                     {visiblePortfolio.map((item) => {
                         // Use calculated delta if avail
@@ -455,13 +459,16 @@ export default function HomeScreen() {
                             <TouchableOpacity
                                 key={item.symbol}
                                 style={styles.coinRow}
-                                onPress={() => router.push({ pathname: '/coin/[id]', params: { id: item.symbol, currency } })}
+                                onPress={() => router.push({ pathname: '/coin/[symbol]', params: { symbol: item.symbol, currency } })}
                             >
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    {/* Icon Placeholder */}
-                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                                        <Text style={{ color: colors.text, fontWeight: 'bold' }}>{item.symbol[0]}</Text>
-                                    </View>
+                                    {/* Coin Icon */}
+                                    <CoinIcon 
+                                        symbol={item.symbol} 
+                                        imageUrl={item.imageUrl} 
+                                        size={40} 
+                                        style={{ marginRight: 12 }} 
+                                    />
                                     <View>
                                         <Text style={styles.coinSymbol}>{item.symbol}</Text>
                                         <Text style={styles.coinPrice}>
@@ -493,7 +500,7 @@ export default function HomeScreen() {
                     })}
 
                     {/* Show/Hide Button */}
-                    {hiddenCount > 0 && (
+                    {(hiddenCount > 0 || showSmallBalances) && (
                         <TouchableOpacity
                             onPress={() => setShowSmallBalances(!showSmallBalances)}
                             style={{
@@ -504,7 +511,7 @@ export default function HomeScreen() {
                             }}
                         >
                             <Text style={{ color: '#64748b', fontSize: 13, fontWeight: '500' }}>
-                                {showSmallBalances ? 'Hide Small Balances' : `Show ${hiddenCount} Small Balances`}
+                                {showSmallBalances ? tr('home.hideSmallBalances', 'Hide Small Balances') : tr('home.showSmallBalances', `Show ${hiddenCount} Small Balances`, { count: hiddenCount })}
                             </Text>
                         </TouchableOpacity>
                     )}
@@ -515,7 +522,7 @@ export default function HomeScreen() {
                         onPress={() => router.push('/add-transaction')}
                     >
                         <Plus color="#000" size={24} />
-                        <Text style={{ color: '#000', fontWeight: 'bold', marginLeft: 8 }}>Add Transaction</Text>
+                        <Text style={{ color: '#000', fontWeight: 'bold', marginLeft: 8 }}>{tr('home.addTransaction', 'Add Transaction')}</Text>
                     </TouchableOpacity>
                 </View>
             </ScrollView>

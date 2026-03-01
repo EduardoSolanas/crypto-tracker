@@ -2,6 +2,7 @@
   "expo": {
     "name": "CryptoPortfolio",
     "slug": "CryptoPortfolio",
+    "description": "CryptoPortfolio is a professional mobile crypto tracker for monitoring holdings, imports, PnL, and live market performance with fast charts and reliable local data.",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,11 +10,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.belcebuu.CryptoPortfolio"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0F2B4A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -31,12 +33,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/branding-source.png",
+          "imageWidth": 320,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#0F2B4A",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#070F1C"
           }
         }
       ],
@@ -45,7 +47,7 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": false
     },
     "extra": {
       "router": {},

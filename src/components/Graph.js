@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
+import { useTheme } from '../utils/theme';
 
 const ranges = ['1H', '24H', '1M', '1Y', 'ALL'];
 
@@ -13,6 +14,7 @@ export default function Graph({
     width,
     height = 220
 }) {
+    const { colors } = useTheme();
     const [range, setRange] = useState('1D');
     const [hoverValue, setHoverValue] = useState(null);
 
@@ -25,8 +27,8 @@ export default function Graph({
     const displayValue = hoverValue !== null ? hoverValue : currentValue;
 
     const chartConfig = {
-        backgroundGradientFrom: '#fff',
-        backgroundGradientTo: '#fff',
+        backgroundGradientFrom: colors.background,
+        backgroundGradientTo: colors.background,
         color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
         strokeWidth: 2,
         decimalPlaces: 2,
@@ -39,11 +41,11 @@ export default function Graph({
     };
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: colors.surface }]}>
             {/* Value Display */}
             <View style={styles.header}>
-                <Text style={styles.value}>{formatMoney(displayValue)}</Text>
-                <Text style={styles.sub}>
+                <Text style={[styles.value, { color: colors.text }]}>{formatMoney(displayValue)}</Text>
+                <Text style={[styles.sub, { color: colors.textSecondary }]}>
                     {hoverValue !== null ? 'Selected' : 'Current Value'}
                 </Text>
             </View>
@@ -72,21 +74,21 @@ export default function Graph({
                         />
                     ) : (
                         <View style={[styles.center, { height }]}>
-                            <Text style={styles.muted}>No data available</Text>
+                            <Text style={[styles.muted, { color: colors.textSecondary }]}>No data available</Text>
                         </View>
                     )
                 )}
             </View>
 
             {/* Ranges */}
-            <View style={styles.rangeRow}>
+            <View style={[styles.rangeRow, { backgroundColor: colors.background }]}>
                 {ranges.map(r => (
                     <TouchableOpacity
                         key={r}
-                        style={[styles.rangeBtn, range === r && styles.rangeBtnActive]}
+                        style={[styles.rangeBtn, range === r && { ...styles.rangeBtnActive, backgroundColor: colors.surface }]}
                         onPress={() => handleRangePress(r)}
                     >
-                        <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>{r}</Text>
+                        <Text style={[styles.rangeText, { color: colors.textSecondary }, range === r && styles.rangeTextActive]}>{r}</Text>
                     </TouchableOpacity>
                 ))}
             </View>
@@ -95,16 +97,16 @@ export default function Graph({
 }
 
 const styles = StyleSheet.create({
-    container: { backgroundColor: '#fff', borderRadius: 16, padding: 16, elevation: 2, marginBottom: 24 },
+    container: { borderRadius: 16, padding: 16, elevation: 2, marginBottom: 24 },
     header: { marginBottom: 16 },
-    value: { fontSize: 24, fontWeight: 'bold', color: '#1e293b' },
-    sub: { fontSize: 12, color: '#64748b', marginTop: 4 },
+    value: { fontSize: 24, fontWeight: 'bold' },
+    sub: { fontSize: 12, marginTop: 4 },
     chartWrapper: { marginBottom: 16, alignItems: 'center' },
     center: { justifyContent: 'center', alignItems: 'center' },
-    muted: { color: '#94a3b8' },
-    rangeRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#f1f5f9', borderRadius: 8, padding: 4 },
+    muted: {},
+    rangeRow: { flexDirection: 'row', justifyContent: 'space-between', borderRadius: 8, padding: 4 },
     rangeBtn: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 6 },
-    rangeBtnActive: { backgroundColor: '#fff', elevation: 1 },
-    rangeText: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+    rangeBtnActive: { elevation: 1 },
+    rangeText: { fontSize: 12, fontWeight: '600' },
     rangeTextActive: { color: '#2563eb' },
 });
