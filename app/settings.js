@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import Feather from '@expo/vector-icons/Feather';
 import { Stack, router } from 'expo-router';
-import { ArrowLeft, Check, Download, Upload } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -43,29 +43,32 @@ export default function SettingsScreen() {
     }, [currencyOptions, currencySearch]);
 
     useEffect(() => {
-        loadSettings();
-    }, []);
+        let isMounted = true;
 
-    const loadSettings = async () => {
-        try {
-            await initDb();
-            const c = await getMeta('currency');
-            if (c) setCurrency(c);
+        async function loadSettings() {
+            try {
+                await initDb();
+                const c = await getMeta('currency');
+                if (isMounted && c) setCurrency(c);
 
-            const savedLanguage = await getMeta('language');
-            const nextLanguage = savedLanguage || 'system';
-            setLanguage(nextLanguage);
+                const savedLanguage = await getMeta('language');
+                const nextLanguage = savedLanguage || 'system';
+                if (isMounted) setLanguage(nextLanguage);
 
-            const resolvedLanguage = nextLanguage === 'system' ? getSystemLanguage() : nextLanguage;
-            await i18n.changeLanguage(resolvedLanguage);
-        } catch (e) {
-            if (globalThis.__DEV__) {
-                console.error(e);
+                const resolvedLanguage = nextLanguage === 'system' ? getSystemLanguage() : nextLanguage;
+                await i18n.changeLanguage(resolvedLanguage);
+            } catch (e) {
+                if (globalThis.__DEV__) {
+                    console.error(e);
+                }
+            } finally {
+                if (isMounted) setLoading(false);
             }
-        } finally {
-            setLoading(false);
         }
-    };
+
+        loadSettings();
+        return () => { isMounted = false; };
+    }, []);
 
     const handleSelectCurrency = async (code) => {
         try {
@@ -269,7 +272,7 @@ export default function SettingsScreen() {
 
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <ArrowLeft color={colors.text} size={24} />
+                    <Feather name="arrow-left" color={colors.text} size={24} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{tr('settings.title', 'Settings')}</Text>
             </View>
@@ -304,7 +307,7 @@ export default function SettingsScreen() {
                             onPress={() => handleSelectLanguage(lang.code)}
                         >
                             <Text style={[styles.rowText, { color: colors.text }]}>{lang.label}</Text>
-                            {language === lang.code && <Check color="#22c55e" size={20} />}
+                            {language === lang.code && <Feather name="check" color="#22c55e" size={20} />}
                         </TouchableOpacity>
                     ))}
                 </View>
@@ -319,7 +322,7 @@ export default function SettingsScreen() {
                         disabled={loading}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Upload size={20} color={colors.text} style={{ marginRight: 12 }} />
+                            <Feather name="upload" size={20} color={colors.text} style={{ marginRight: 12 }} />
                             <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.importCsv', 'Import CSV')}</Text>
                         </View>
                     </TouchableOpacity>
@@ -330,7 +333,7 @@ export default function SettingsScreen() {
                         disabled={loading}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Download size={20} color={colors.text} style={{ marginRight: 12 }} />
+                            <Feather name="download" size={20} color={colors.text} style={{ marginRight: 12 }} />
                             <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.exportCsv', 'Export CSV')}</Text>
                         </View>
                     </TouchableOpacity>
@@ -369,7 +372,7 @@ export default function SettingsScreen() {
                                         <Text style={[styles.rowText, { color: colors.text }]}>{item.code}</Text>
                                         <Text style={{ color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>{item.name}</Text>
                                     </View>
-                                    {currency === item.code && <Check color="#22c55e" size={20} />}
+                                    {currency === item.code && <Feather name="check" color="#22c55e" size={20} />}
                                 </TouchableOpacity>
                             )}
                             ListEmptyComponent={
@@ -524,3 +527,4 @@ const styles = StyleSheet.create({
         padding: 12,
     }
 });
+

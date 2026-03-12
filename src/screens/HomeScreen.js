@@ -1,7 +1,5 @@
-import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
-import { Plus, Settings, TrendingUp } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -59,6 +57,23 @@ export default function HomeScreen() {
         () => (portfolio ? portfolio.reduce((acc, c) => acc + c.value, 0) : 0),
         [portfolio]
     );
+
+    const [coinDeltas, setCoinDeltas] = useState({});
+    const [showSmallBalances, setShowSmallBalances] = useState(false);
+    const isMountedRef = useRef(true);
+
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
+    const safeSetState = useCallback((setter, value) => {
+        if (isMountedRef.current) {
+            setter(value);
+        }
+    }, []);
 
     const getEffectiveHoldings = useCallback(async () => {
         const allTxns = await getAllTransactions();
@@ -172,52 +187,44 @@ export default function HomeScreen() {
     }, [computeHistory, currency, portfolio, range]);
 
     useEffect(() => {
-        if (didBootstrapRef.current) return;
-        didBootstrapRef.current = true;
-        (async () => {
+        async function bootstrap() {
+            if (didBootstrapRef.current) return;
+            didBootstrapRef.current = true;
+
             try {
                 await initDb();
-                const savedCurrency = await getMeta('currency');
-                if (savedCurrency) setCurrency(savedCurrency);
+                const currentCurrency = await getMeta('currency');
+                if (currentCurrency) safeSetState(setCurrency, currentCurrency);
 
-                const holdings = await getEffectiveHoldings();
                 const cached = await loadCache();
+                const holdingsMap = await getEffectiveHoldings();
 
-                // Boot: Try smart fetch (which respects timeouts)
-                // If smartFetch returns, it handles cache logic internally (returns stored items if fresh)
-                const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp);
+                const filteredCachedPortfolio = cached?.portfolio ?
+                    cached.portfolio.filter(item => Object.keys(holdingsMap).includes(item.symbol)) : null;
 
-                const allTxns = await getAllTransactions();
-                setPortfolio(p);
-                computeHistory(allTxns, p, savedCurrency || currency, '1D');
-            } catch (e) {
-                // If API fails, try to load cache (even if stale)
-                const loaded = await loadCache();
+                const nextPortfolio = await smartFetchPortfolio(holdingsMap, filteredCachedPortfolio, cached?.timestamp);
+                safeSetState(setPortfolio, nextPortfolio);
 
-                if (loaded) {
-                    setPortfolio(loaded.portfolio);
-                    setChartData(loaded.chartData);
-                    setDelta(loaded.delta);
-                    setRange(loaded.range);
-                    Alert.alert(tr('home.offlineModeTitle', 'Offline Mode'), tr('home.offlineModeMessage', 'Using cached data (API Limit / Network).'));
+                if (cached?.chartData && cached?.range === range) {
+                    safeSetState(setChartData, cached.chartData);
+                    safeSetState(setDelta, cached.delta);
                 } else {
-                    if (e.message && e.message.includes('Rate Limit')) {
-                        Alert.alert(tr('home.apiLimitTitle', 'API Limit'), tr('home.apiLimitMessage', 'Rate limit reached. Please wait.'));
-                    } else if (e.message && e.message.includes('Type 99')) {
-                        Alert.alert(tr('home.apiLimitTitle', 'API Limit'), tr('home.apiLimitMessage', 'Rate limit reached. Please wait.'));
-                    } else {
-                        Alert.alert(tr('general.error', 'Error'), e.message);
-                    }
+                    await refreshData(range);
                 }
+            } catch (e) {
+                debugLog('Bootstrap error:', e);
             } finally {
-                setBooting(false);
+                safeSetState(setBooting, false);
             }
-        })();
-    }, [computeHistory, currency, getEffectiveHoldings, smartFetchPortfolio, tr]);
+        }
+
+        bootstrap();
+    }, [range, refreshData, getEffectiveHoldings, smartFetchPortfolio, safeSetState]);
 
     const pickAndImportCsv = async () => {
         let result;
         try {
+            const DocumentPicker = await import('expo-document-picker');
             result = await DocumentPicker.getDocumentAsync({
                 type: ['text/csv', 'text/comma-separated-values', '*/*'],
                 copyToCacheDirectory: true,
@@ -235,6 +242,7 @@ export default function HomeScreen() {
         try {
             let text;
             if (asset.uri.startsWith('file://') || asset.uri.startsWith('content://')) {
+                const FileSystem = await import('expo-file-system/legacy');
                 text = await FileSystem.readAsStringAsync(asset.uri);
             } else {
                 const res = await fetch(asset.uri);
@@ -290,292 +298,219 @@ export default function HomeScreen() {
         }
     };
 
-    const [coinDeltas, setCoinDeltas] = useState({});
+    const refreshData = useCallback(async (selectedRange = range) => {
+        safeSetState(setGraphLoading, true);
+        setGraphError('');
+        try {
+            const holdingsMap = await getEffectiveHoldings();
+            const txs = await getAllTransactions();
+            const currentCurrency = await getMeta('currency') || currency;
 
-    const [showSmallBalances, setShowSmallBalances] = useState(false);
+            const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
+                holdingsMap,
+                txs,
+                currency: currentCurrency,
+                range: selectedRange
+            });
 
-    // Filter for display
-    const visiblePortfolio = useMemo(() => {
+            safeSetState(setChartData, chartData);
+            safeSetState(setDelta, delta);
+            safeSetState(setChartColor, chartColor);
+            safeSetState(setCoinDeltas, coinDeltas);
+
+            if (portfolio?.length) {
+                saveCache(portfolio, chartData, delta, selectedRange);
+            }
+        } catch (e) {
+            safeSetState(setGraphError, e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
+        } finally {
+            safeSetState(setGraphLoading, false);
+        }
+    }, [range, currency, portfolio, tr, getEffectiveHoldings, safeSetState]);
+
+    const filteredPortfolio = useMemo(() => {
+        if (!portfolio) return null;
+        return portfolio.filter(c => c.value >= 10);
+    }, [portfolio]);
+
+    const smallBalances = useMemo(() => {
         if (!portfolio) return [];
-        return portfolio
-            .filter(p => showSmallBalances || p.value >= 10)
-            .sort((a, b) => b.value - a.value);
-    }, [portfolio, showSmallBalances]);
+        return portfolio.filter(c => c.value < 10);
+    }, [portfolio]);
 
-    // Count hidden
-    const hiddenCount = (portfolio?.length || 0) - visiblePortfolio.length;
+    const displayedPortfolio = showSmallBalances ? portfolio : filteredPortfolio;
 
     if (booting) {
         return (
-            <SafeAreaView style={[{ flex: 1, backgroundColor: colors.background }, styles.centerContent]}>
-                <ActivityIndicator color={colors.text} />
-            </SafeAreaView>
-        );
-    }
-
-    if (!portfolio) {
-        return (
-            <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-                <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
-                <View style={[styles.centerContent]}>
-                    <TrendingUp color={colors.text} size={48} />
-                    <Text style={[styles.title, { color: colors.text }]}>{tr('home.portfolio', 'Portfolio')}</Text>
-                    <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{tr('home.noData', 'No data. Import CSV.')}</Text>
-                    <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.primary }]} onPress={pickAndImportCsv} disabled={loading}>
-                        {loading ? <ActivityIndicator color={colors.primaryInverse} /> : <Text style={[styles.uploadBtnText, { color: colors.primaryInverse }]}>{tr('home.importCsv', 'Import CSV')}</Text>}
-                    </TouchableOpacity>
-                </View>
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+                <ActivityIndicator size="large" color={colors.primary} style={{ flex: 1 }} />
             </SafeAreaView>
         );
     }
 
     return (
-        <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+            <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
             <ScrollView
-                contentContainerStyle={{ paddingBottom: 100 }}
-                refreshControl={
-                    <RefreshControl refreshing={loading} onRefresh={refreshPrices} tintColor={colors.text} />
-                }
+                refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshPrices} tintColor={colors.primary} />}
+                contentContainerStyle={{ paddingBottom: 40 }}
             >
-                <View style={[styles.header, { paddingTop: 60 }]}>
+                <View style={styles.header}>
                     <View>
-                        <Text style={[styles.subTitle, { color: colors.textSecondary }]}>{tr('home.totalWorth', 'Total Worth')}</Text>
-                        <Text style={[styles.totalText, { color: colors.text }]}>
-                            {formatMoney(totalValue, currency)}
-                        </Text>
+                        <Text style={[styles.title, { color: colors.textSecondary }]}>{tr('home.portfolio', 'Portfolio')}</Text>
+                        <Text style={[styles.totalValue, { color: colors.text }]}>{formatMoney(totalValue, currency)}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                            <Text style={{
-                                color: delta.val >= 0 ? colors.success : colors.error,
-                                fontSize: 16,
-                                fontWeight: '600',
-                                marginRight: 6
-                            }}>
+                            <Text style={[styles.delta, { color: chartColor }]}>
                                 {delta.val >= 0 ? '+' : ''}{formatMoney(delta.val, currency)}
                             </Text>
-                            <View style={{
-                                backgroundColor: delta.val >= 0 ? colors.successBg : colors.errorBg,
-                                paddingHorizontal: 6,
-                                paddingVertical: 2,
-                                borderRadius: 4
-                            }}>
-                                <Text style={{
-                                    color: delta.val >= 0 ? colors.success : colors.error,
-                                    fontSize: 12,
-                                    fontWeight: '700'
-                                }}>
-                                    {delta.pct.toFixed(2)}%
+                            <View style={[styles.pctBadge, { backgroundColor: chartColor + '20' }]}>
+                                <Text style={[styles.pctText, { color: chartColor }]}>
+                                    {delta.pct >= 0 ? '+' : ''}{delta.pct.toFixed(2)}%
                                 </Text>
                             </View>
                         </View>
                     </View>
-                    <TouchableOpacity onPress={() => router.push('/settings')} style={[styles.iconButton, { backgroundColor: colors.surfaceElevated }]}>
-                        <Settings color={colors.text} size={24} />
+                    <TouchableOpacity onPress={() => router.push('/settings')} style={styles.settingsBtn}>
+                        <Feather name="settings" size={24} color={colors.text} />
                     </TouchableOpacity>
                 </View>
 
-                {/* GRAPH */}
-                <View style={{ marginBottom: 24 }}>
-                    <CryptoGraph
-                        data={chartData}
-                        currentValue={totalValue}
-                        currency={currency}
-                        type="line"
-                        onRangeChange={() => { }}
-                        showGrid={false}
-                        height={220}
-                        color={chartColor}
-                    />
-                    {!!graphError && (
-                        <View style={{ alignItems: 'center', marginTop: 12 }}>
-                            <Text style={{ color: colors.error, fontSize: 12, marginBottom: 8 }}>{graphError}</Text>
-                            <TouchableOpacity
-                                onPress={refreshPrices}
-                                style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.surfaceElevated }}
-                            >
-                                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{tr('general.retry', 'Retry')}</Text>
-                            </TouchableOpacity>
-                        </View>
-                    )}
-                    {/* Range Selector */}
-                    <View style={{
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        paddingHorizontal: 16,
-                        marginTop: 16
-                    }}>
-                        {['1H', '1D', '1W', '1M', '1Y', 'ALL'].map(r => (
-                            <TouchableOpacity
-                                key={r}
-                                onPress={() => setRange(r)}
-                                disabled={graphLoading}
-                                style={{
-                                    paddingVertical: 6,
-                                    paddingHorizontal: 12,
-                                    borderRadius: 16,
-                                    backgroundColor: range === r ? colors.surfaceElevated : 'transparent',
-                                    opacity: graphLoading ? 0.5 : 1
-                                }}
-                            >
-                                <Text style={{
-                                    color: range === r ? colors.text : colors.textSecondary,
-                                    fontWeight: '600',
-                                    fontSize: 13
-                                }}>{r}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                    {graphLoading && (
-                        <ActivityIndicator size="small" color={colors.text} style={{ marginTop: 10 }} />
-                    )}
+                <CryptoGraph
+                    data={chartData}
+                    range={range}
+                    onRangeChange={setRange}
+                    loading={graphLoading}
+                    error={graphError}
+                    color={chartColor}
+                    currency={currency}
+                />
+
+                <View style={styles.assetsHeader}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>{tr('home.assets', 'Assets')}</Text>
                 </View>
 
-                {/* ASSETS LIST */}
-                <View style={{ paddingHorizontal: 16 }}>
-                    <Text style={{ color: colors.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>{tr('home.assets', 'Assets')}</Text>
-
-                    {visiblePortfolio.map((item) => {
-                        // Use calculated delta if avail
-                        let deltaData = coinDeltas[item.symbol];
-
-                        // If deltaData is missing or undefined
-                        if (!deltaData) {
-                            // Fallback approximation using 24h change
-                            const startPrice = item.price / (1 + (item.change24h / 100));
-                            const valDelta = (item.price - startPrice) * item.quantity;
-                            deltaData = { val: valDelta, pct: item.change24h };
-                        }
-
-                        // Safety check: if deltaData came from legacy state as just a number (unlikely but possible during hot reload)
-                        if (typeof deltaData === 'number') {
-                            const pct = deltaData;
-                            const startPrice = item.price / (1 + (pct / 100));
-                            const valDelta = (item.price - startPrice) * item.quantity;
-                            deltaData = { val: valDelta, pct: pct };
-                        }
-
-                        const isPositive = deltaData.val >= 0;
-
-                        return (
-                            <TouchableOpacity
-                                key={item.symbol}
-                                style={styles.coinRow}
-                                onPress={() => router.push({ pathname: '/coin/[symbol]', params: { symbol: item.symbol, currency } })}
-                            >
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    {/* Coin Icon */}
-                                    <CoinIcon 
-                                        symbol={item.symbol} 
-                                        imageUrl={item.imageUrl} 
-                                        size={40} 
-                                        style={{ marginRight: 12 }} 
-                                    />
-                                    <View>
-                                        <Text style={styles.coinSymbol}>{item.symbol}</Text>
-                                        <Text style={styles.coinPrice}>
-                                            {item.quantity.toFixed(0)} | {formatMoney(item.price, currency)}
-                                        </Text>
-                                    </View>
-                                </View>
-                                <View style={{ alignItems: 'flex-end' }}>
-                                    <Text style={styles.coinValue}>{formatMoney(item.value, currency)}</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <Text style={{
-                                            color: isPositive ? colors.successLight : colors.errorLight,
-                                            fontSize: 13,
-                                            fontWeight: '500'
-                                        }}>
-                                            {isPositive ? '+' : ''}{formatMoney(deltaData.val, currency)}
-                                        </Text>
-                                        <Text style={{
-                                            color: isPositive ? colors.successLight : colors.errorLight,
-                                            fontSize: 13,
-                                            marginLeft: 6
-                                        }}>
-                                            ({isPositive ? '+' : ''}{deltaData.pct.toFixed(2)}%)
-                                        </Text>
-                                    </View>
-                                </View>
-                            </TouchableOpacity>
-                        )
-                    })}
-
-                    {/* Show/Hide Button */}
-                    {(hiddenCount > 0 || showSmallBalances) && (
+                {displayedPortfolio?.length > 0 ? (
+                    displayedPortfolio.map((item) => (
                         <TouchableOpacity
-                            onPress={() => setShowSmallBalances(!showSmallBalances)}
-                            style={{
-                                alignSelf: 'center',
-                                marginTop: 12,
-                                paddingVertical: 8,
-                                paddingHorizontal: 16,
-                            }}
+                            key={item.symbol}
+                            style={[styles.assetRow, { backgroundColor: colors.surface }]}
+                            onPress={() => router.push({
+                                pathname: `/coin/${item.symbol}`,
+                                params: { symbol: item.symbol, id: item.id }
+                            })}
                         >
-                            <Text style={{ color: '#64748b', fontSize: 13, fontWeight: '500' }}>
-                                {showSmallBalances ? tr('home.hideSmallBalances', 'Hide Small Balances') : tr('home.showSmallBalances', `Show ${hiddenCount} Small Balances`, { count: hiddenCount })}
-                            </Text>
+                            <View style={styles.assetLeft}>
+                                <CoinIcon symbol={item.symbol} size={40} />
+                                <View style={{ marginLeft: 12 }}>
+                                    <Text style={[styles.assetSymbol, { color: colors.text }]}>{item.symbol}</Text>
+                                    <Text style={{ color: colors.textSecondary }}>
+                                        {item.quantity.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                    </Text>
+                                </View>
+                            </View>
+                            <View style={styles.assetRight}>
+                                <Text style={[styles.assetValue, { color: colors.text }]}>{formatMoney(item.value, currency)}</Text>
+                                <Text style={[styles.assetPrice, { color: colors.textSecondary }]}>{formatMoney(item.price, currency)}</Text>
+                            </View>
                         </TouchableOpacity>
-                    )}
+                    ))
+                ) : (
+                    <View style={styles.emptyContainer}>
+                        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{tr('home.noData', 'No data. Import CSV.')}</Text>
+                        <TouchableOpacity style={[styles.importBtn, { backgroundColor: colors.primary }]} onPress={pickAndImportCsv}>
+                            <Text style={styles.importBtnText}>{tr('home.importCsv', 'Import CSV')}</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
 
-                    {/* Add Button */}
+                {smallBalances.length > 0 && (
                     <TouchableOpacity
-                        style={styles.addButton}
-                        onPress={() => router.push('/add-transaction')}
+                        style={[styles.smallBalancesToggle, { borderTopColor: colors.borderLight }]}
+                        onPress={() => setShowSmallBalances(!showSmallBalances)}
                     >
-                        <Plus color="#000" size={24} />
-                        <Text style={{ color: '#000', fontWeight: 'bold', marginLeft: 8 }}>{tr('home.addTransaction', 'Add Transaction')}</Text>
+                        <Text style={[styles.smallBalancesText, { color: colors.primary }]}>
+                            {showSmallBalances
+                                ? tr('home.hideSmallBalances', 'Hide Small Balances')
+                                : tr('home.showSmallBalances', `Show ${smallBalances.length} Small Balances`, { count: smallBalances.length })}
+                        </Text>
+                        <Feather name={showSmallBalances ? "chevron-up" : "chevron-down"} size={16} color={colors.primary} />
                     </TouchableOpacity>
-                </View>
+                )}
             </ScrollView>
-        </View>
+
+            <TouchableOpacity
+                style={[styles.fab, { backgroundColor: colors.primary }]}
+                onPress={() => router.push('/add-transaction')}
+            >
+                <Feather name="plus" size={24} color="#fff" />
+            </TouchableOpacity>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#000000' },
-    centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 12, paddingTop: 60 },
-    subTitle: { color: '#94a3b8', fontSize: 14, marginTop: 4 },
-    totalText: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginVertical: 4 },
-    iconButton: { padding: 8, backgroundColor: '#334155', borderRadius: 20 },
-
-    scrollContent: { paddingBottom: 40 },
-
-    heroSection: { paddingHorizontal: 16, paddingTop: 16 },
-    heroLabel: { color: '#94a3b8', fontSize: 14 },
-    heroValue: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginVertical: 4 },
-    deltaRow: { flexDirection: 'row', alignItems: 'center' },
-    deltaText: { fontSize: 14, fontWeight: '600' },
-
-    chartSection: { marginTop: 24, marginBottom: 24 },
-    rangeRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 16, paddingHorizontal: 16 },
-    rangeText: { color: '#64748b', fontSize: 14, fontWeight: '600' },
-    rangeTextActive: { color: '#fff', backgroundColor: '#333', paddingHorizontal: 12, paddingVertical: 2, borderRadius: 12, overflow: 'hidden' },
-
-    assetsList: { paddingHorizontal: 16 },
-    coinRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-    coinLeft: { flexDirection: 'row', alignItems: 'center' },
-    coinIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f59e0b', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    coinIconText: { color: '#fff', fontWeight: 'bold' },
-    rowSymbol: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
-    rowQty: { color: '#94a3b8', fontSize: 14 },
-    coinRight: { alignItems: 'flex-end' },
-    rowValue: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
-    changeText: { fontSize: 14, fontWeight: '600', marginTop: 2 },
-    textGreen: { color: '#22c55e' },
-    textRed: { color: '#ef4444' },
-
-    coinSymbol: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
-    coinPrice: { color: '#94a3b8', fontSize: 13 },
-    coinValue: { fontWeight: 'bold', color: '#fff', fontSize: 16 },
-
-    addButton: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-        backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, marginTop: 24
+    container: { flex: 1 },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        marginBottom: 16,
     },
-
-    title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginTop: 16 },
-    subtitle: { color: '#94a3b8', marginTop: 8, marginBottom: 24 },
-    uploadBtn: { backgroundColor: '#fff', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 8 },
-    uploadBtnText: { color: '#000', fontWeight: 'bold' },
+    title: { fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+    totalValue: { fontSize: 32, fontWeight: 'bold', marginVertical: 4 },
+    delta: { fontSize: 16, fontWeight: '600', marginRight: 8 },
+    pctBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+    pctText: { fontSize: 12, fontWeight: 'bold' },
+    settingsBtn: { padding: 8 },
+    assetsHeader: { paddingHorizontal: 16, marginBottom: 12, marginTop: 8 },
+    sectionTitle: { fontSize: 20, fontWeight: 'bold' },
+    assetRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        padding: 16,
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 12,
+    },
+    assetLeft: { flexDirection: 'row', alignItems: 'center' },
+    assetSymbol: { fontSize: 18, fontWeight: 'bold' },
+    assetRight: { alignItems: 'flex-end' },
+    assetValue: { fontSize: 18, fontWeight: '600' },
+    assetPrice: { fontSize: 14, marginTop: 2 },
+    emptyContainer: { alignItems: 'center', padding: 40 },
+    emptyText: { fontSize: 16, marginBottom: 20 },
+    importBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
+    importBtnText: { color: '#fff', fontWeight: 'bold' },
+    fab: {
+        position: 'absolute',
+        right: 20,
+        bottom: 20,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+    },
+    smallBalancesToggle: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        marginTop: 8,
+        borderTopWidth: 1,
+        marginHorizontal: 16,
+    },
+    smallBalancesText: {
+        fontSize: 14,
+        fontWeight: '600',
+        marginRight: 4,
+    },
 });
+

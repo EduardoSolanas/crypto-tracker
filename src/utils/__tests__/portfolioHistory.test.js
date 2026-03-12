@@ -25,7 +25,7 @@ describe('computePortfolioHistory', () => {
         });
 
         it('filters out assets with low value', async () => {
-            const result = await computePortfolioHistory({
+            await computePortfolioHistory({
                 allTxns: [{ dateISO: new Date().toISOString(), symbol: 'DUST', amount: 1000, way: 'BUY' }],
                 currentPortfolio: [
                     { symbol: 'DUST', value: 5, quantity: 1000, price: 0.005, change24h: 0 }

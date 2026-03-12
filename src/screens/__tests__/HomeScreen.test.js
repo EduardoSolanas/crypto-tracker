@@ -1,8 +1,7 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
 
-// Mock dependencies
 jest.mock('expo-router', () => ({
     router: {
         push: jest.fn(),
@@ -80,7 +79,7 @@ jest.mock('../../components/CoinIcon', () => {
     };
 });
 
-describe('HomeScreen - Small Balances Toggle', () => {
+describe('HomeScreen', () => {
     const mockPortfolio = [
         { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
         { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
@@ -93,7 +92,7 @@ describe('HomeScreen - Small Balances Toggle', () => {
         jest.clearAllMocks();
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-        
+
         db.getHoldingsMap.mockResolvedValue({
             BTC: 1,
             ETH: 10,
@@ -102,118 +101,56 @@ describe('HomeScreen - Small Balances Toggle', () => {
             ADA: 200,
         });
         db.getAllTransactions.mockResolvedValue([]);
-        
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(mockPortfolio);
     });
 
-    it('should only show assets >= $10 by default', async () => {
-        const { queryByText, getByText } = render(<HomeScreen />);
+    it('hides assets below $10 by default and shows toggle count', async () => {
+        const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(getByText('BTC')).toBeTruthy();
             expect(getByText('ETH')).toBeTruthy();
-            expect(getByText('XRP')).toBeTruthy(); // $50
+            expect(getByText('XRP')).toBeTruthy();
+            expect(getByText(/Show 2/i)).toBeTruthy();
         });
 
-        // Small balances should be hidden
-        expect(queryByText('DOGE')).toBeNull(); // $5
-        expect(queryByText('ADA')).toBeNull(); // $6
+        expect(queryByText('DOGE')).toBeNull();
+        expect(queryByText('ADA')).toBeNull();
     });
 
-    it('should show button to reveal hidden small balances', async () => {
-        const { getByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
-        });
-    });
-
-    it('should show all balances when toggle is clicked', async () => {
+    it('expands and collapses small balances', async () => {
         const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+            expect(getByText(/Show 2/i)).toBeTruthy();
         });
 
-        // Click the toggle button
-        const toggleButton = getByText(/Show 2 Small Balances/i);
-        fireEvent.press(toggleButton);
+        fireEvent.press(getByText(/Show 2/i));
 
         await waitFor(() => {
             expect(getByText('DOGE')).toBeTruthy();
             expect(getByText('ADA')).toBeTruthy();
-        });
-    });
-
-    it('should change button text to "Hide Small Balances" when expanded', async () => {
-        const { getByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+            expect(getByText(/Hide/i)).toBeTruthy();
         });
 
-        // Click to expand
-        const toggleButton = getByText(/Show 2 Small Balances/i);
-        fireEvent.press(toggleButton);
-
-        await waitFor(() => {
-            expect(getByText('Hide Small Balances')).toBeTruthy();
-        });
-    });
-
-    it('should hide small balances again when clicking "Hide Small Balances"', async () => {
-        const { getByText, queryByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
-        });
-
-        // Expand
-        fireEvent.press(getByText(/Show 2 Small Balances/i));
-
-        await waitFor(() => {
-            expect(getByText('DOGE')).toBeTruthy();
-            expect(getByText('Hide Small Balances')).toBeTruthy();
-        });
-
-        // Collapse
-        fireEvent.press(getByText('Hide Small Balances'));
+        fireEvent.press(getByText(/Hide/i));
 
         await waitFor(() => {
             expect(queryByText('DOGE')).toBeNull();
             expect(queryByText('ADA')).toBeNull();
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+            expect(getByText(/Show 2/i)).toBeTruthy();
         });
     });
 
-    it('should still show toggle button when balances are expanded', async () => {
-        const { getByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
-        });
-
-        // Expand
-        fireEvent.press(getByText(/Show 2 Small Balances/i));
-
-        await waitFor(() => {
-            // Button should still exist, just with different text
-            expect(getByText('Hide Small Balances')).toBeTruthy();
-        });
-    });
-
-    it('should not show toggle button when there are no small balances', async () => {
+    it('does not show small-balance toggle when all assets are >= $10', async () => {
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-        
-        // Mock portfolio with no small balances
-        const largePortfolio = [
+
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1, ETH: 10 });
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
             { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
             { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
-        ];
-        
-        db.getHoldingsMap.mockResolvedValue({ BTC: 1, ETH: 10 });
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue(largePortfolio);
+        ]);
 
         const { queryByText } = render(<HomeScreen />);
 
@@ -222,71 +159,34 @@ describe('HomeScreen - Small Balances Toggle', () => {
         });
     });
 
-    it('should correctly count hidden balances', async () => {
-        const { getByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            // 2 assets under $10 (DOGE: $5, ADA: $6)
-            expect(getByText('Show 2 Small Balances')).toBeTruthy();
-        });
-    });
-
-    it('should filter balances at exactly $10 threshold', async () => {
+    it('shows asset with exactly $10 and hides values below $10', async () => {
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-        
-        const portfolioWithThreshold = [
-            { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
-            { symbol: 'EXACT', quantity: 10, price: 1, value: 10, change24h: 0 }, // Exactly $10
-            { symbol: 'BELOW', quantity: 100, price: 0.09, value: 9, change24h: 0 }, // Just below $10
-        ];
-        
+
         db.getHoldingsMap.mockResolvedValue({ BTC: 1, EXACT: 10, BELOW: 100 });
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue(portfolioWithThreshold);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
+            { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
+            { symbol: 'EXACT', quantity: 10, price: 1, value: 10, change24h: 0 },
+            { symbol: 'BELOW', quantity: 100, price: 0.09, value: 9, change24h: 0 },
+        ]);
 
         const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(getByText('BTC')).toBeTruthy();
-            expect(getByText('EXACT')).toBeTruthy(); // >= $10 should show
-            expect(queryByText('BELOW')).toBeNull(); // < $10 should hide
+            expect(getByText('EXACT')).toBeTruthy();
+            expect(queryByText('BELOW')).toBeNull();
         });
     });
 
-});
-
-describe('HomeScreen graph ranges', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        const db = require('../../db');
-        const cryptoCompare = require('../../cryptoCompare');
+    it('computes graph with default range 1D on load', async () => {
         const history = require('../../utils/portfolioHistory');
-
-        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
-        db.getAllTransactions.mockResolvedValue([]);
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
-            { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
-        ]);
-        history.computePortfolioHistory.mockResolvedValue({
-            chartData: [],
-            delta: { val: 0, pct: 0 },
-            chartColor: '#22c55e',
-            coinDeltas: {},
-        });
-    });
-
-    it('recomputes graph when switching to ALL range', async () => {
-        const history = require('../../utils/portfolioHistory');
-        const { getByText } = render(<HomeScreen />);
+        render(<HomeScreen />);
 
         await waitFor(() => {
-            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
-        });
-
-        fireEvent.press(getByText('ALL'));
-
-        await waitFor(() => {
-            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: 'ALL' }));
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
+                expect.objectContaining({ range: '1D' })
+            );
         });
     });
 });

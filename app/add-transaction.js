@@ -1,5 +1,5 @@
+import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Check } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -127,7 +127,7 @@ export default function AddTransactionScreen() {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-                    <ArrowLeft color={colors.text} size={24} />
+                    <Feather name="arrow-left" color={colors.text} size={24} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{t('addTransaction.title')}</Text>
                 <View style={{ width: 40 }} />
@@ -202,7 +202,7 @@ export default function AddTransactionScreen() {
                     <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={handleSave} disabled={loading}>
                         {loading ? <ActivityIndicator color={colors.primaryInverse} /> : (
                             <>
-                                <Check color={colors.primaryInverse} size={20} />
+                                <Feather name="check" color={colors.primaryInverse} size={20} />
                                 <Text style={[styles.saveText, { color: colors.primaryInverse }]}>{t('addTransaction.saveTransaction')}</Text>
                             </>
                         )}
@@ -235,3 +235,4 @@ const styles = StyleSheet.create({
     saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, marginTop: 16 },
     saveText: { fontWeight: 'bold', fontSize: 16, marginLeft: 8 }
 });
+

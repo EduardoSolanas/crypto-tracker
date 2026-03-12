@@ -25,6 +25,7 @@ function resolveDeviceLanguage() {
 }
 
 if (!i18n.isInitialized) {
+    // eslint-disable-next-line import/no-named-as-default-member
     i18n
         .use(initReactI18next)
         .init({

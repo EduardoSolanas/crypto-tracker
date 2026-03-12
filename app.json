@@ -3,7 +3,7 @@
     "name": "CryptoPortfolio",
     "slug": "CryptoPortfolio",
     "description": "CryptoPortfolio is a professional mobile crypto tracker for monitoring holdings, imports, PnL, and live market performance with fast charts and reliable local data.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cryptoportfolio",

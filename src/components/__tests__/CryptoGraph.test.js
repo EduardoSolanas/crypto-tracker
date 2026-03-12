@@ -1,4 +1,5 @@
 import { render } from '@testing-library/react-native';
+import CryptoGraph from '../CryptoGraph';
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
@@ -6,7 +7,6 @@ jest.mock('react-native-wagmi-charts', () => {
 
     const MockView = ({ children, pointerEvents, ...props }) => 
         React.createElement(View, { ...props, pointerEvents }, children);
-    const MockText = ({ style, children }) => React.createElement(Text, { style }, children);
 
     function LineChartComponent({ children }) {
         return React.createElement(View, { testID: 'line-chart' }, children);
@@ -30,8 +30,6 @@ jest.mock('react-native-wagmi-charts', () => {
         CandlestickChart: CandlestickChartComponent,
     };
 });
-
-import CryptoGraph from '../CryptoGraph';
 
 describe('CryptoGraph', () => {
     describe('Basic Rendering', () => {
@@ -207,7 +205,7 @@ describe('CryptoGraph', () => {
                     value: 30000 + Math.sin(i / 4) * 2000 // Wave pattern
                 }));
 
-                const { getByText, getByTestId } = render(
+                const { getByTestId } = render(
                     <CryptoGraph type="line" data={mockData} currency="GBP" />
                 );
 

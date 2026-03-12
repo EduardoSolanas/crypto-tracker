@@ -1,6 +1,6 @@
+import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MoreVertical, Plus } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     ActivityIndicator,
@@ -47,7 +47,7 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                 </View>
                 <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr} {t('coin.viaManual')}</Text>
                 <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={{ marginLeft: 'auto' }}>
-                    <MoreVertical size={16} color={colors.textSecondary} />
+                    <Feather name="more-vertical" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
             </View>
 
@@ -100,8 +100,18 @@ export default function CoinScreen() {
     const [chartData, setChartData] = useState([]);
     const [chartLoading, setChartLoading] = useState(false);
     const [chartError, setChartError] = useState('');
-    const [deferredReady, setDeferredReady] = useState(false);
     const [fxRates, setFxRates] = useState({});
+    const [deferredReady, setDeferredReady] = useState(false);
+
+    const isMountedRef = useRef(true);
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => { isMountedRef.current = false; };
+    }, []);
+
+    const safeSetState = useCallback((setter, value) => {
+        if (isMountedRef.current) setter(value);
+    }, []);
 
     const refreshData = useCallback(async () => {
         try {
@@ -119,87 +129,79 @@ export default function CoinScreen() {
         (async () => {
             setLoading(true);
             try {
-                const c = (await getMeta('currency')) || 'EUR';
-                setCurrency(c);
+                const c = await getMeta('currency');
+                if (c) safeSetState(setCurrency, c);
 
                 const holdings = await getHoldingsMap();
-                const p = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, c);
-                setCoin(p[0] || { symbol: sym, quantity: holdings[sym] || 0, price: 0, value: 0, change24h: 0 });
+                const portfolio = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, c || 'EUR');
+                if (portfolio && portfolio.length > 0) {
+                    safeSetState(setCoin, portfolio[0]);
+                }
 
-                // Price is shown, now unblock the UI
-                setLoading(false);
-
-                // Now fetch transactions in background
-                const rows = await listTransactionsBySymbol(sym);
-                setTxs(rows);
+                const transactions = await listTransactionsBySymbol(sym);
+                safeSetState(setTxs, transactions || []);
 
                 InteractionManager.runAfterInteractions(() => {
-                    setDeferredReady(true);
+                    safeSetState(setDeferredReady, true);
                 });
             } catch (e) {
                 if (globalThis.__DEV__) console.error('Initial load error:', e);
-                setLoading(false);
+            } finally {
+                safeSetState(setLoading, false);
             }
         })();
-    }, [sym]);
+    }, [sym, safeSetState]);
 
     useEffect(() => {
+        const quoteCurrencies = [...new Set(txs.map(t => String(t.quote_currency || t.quoteCurrency || currency).toUpperCase()))];
+        if (quoteCurrencies.length === 0) return;
+
         let active = true;
         (async () => {
-            const quoteCurrencies = [...new Set(
-                txs
-                    .map((t) => String(t.quote_currency || t.quoteCurrency || currency).toUpperCase())
-                    .filter(Boolean)
-            )];
             const rates = await fetchFxRates(quoteCurrencies, currency);
             if (active) {
-                setFxRates(rates);
+                safeSetState(setFxRates, rates);
             }
         })();
-        return () => {
-            active = false;
-        };
-    }, [currency, txs]);
+        return () => { active = false; };
+    }, [txs, currency, safeSetState]);
 
     useEffect(() => {
         let isMounted = true;
         (async () => {
             if (!sym) return;
-            setChartLoading(true);
-            setChartError('');
+            safeSetState(setChartLoading, true);
+            safeSetState(setChartError, '');
             try {
                 const startTime = Date.now();
                 const earliestTxMs = txs.length
-                    ? txs.reduce((min, t) => {
-                        const ts = new Date(t.date_iso).getTime();
-                        return Number.isFinite(ts) ? Math.min(min, ts) : min;
-                    }, Date.now())
-                    : null;
-                const { timeframe, limit, aggregate } = getCoinChartFetchParams(range, { earliestTxMs });
+                    ? Math.min(...txs.map((t) => new Date(t.date_iso).getTime()))
+                    : Date.now() - 365 * 24 * 60 * 60 * 1000;
 
-                const candles = await fetchCandles(sym, currency, timeframe, limit, aggregate);
-                const endTime = Date.now();
+                const params = getCoinChartFetchParams(range, earliestTxMs);
+                const candles = await fetchCandles(sym, currency, params.timeframe, params.limit, params.aggregate);
+
                 if (globalThis.__DEV__) {
-                    console.log(`[PERF] Coin Chart (${range}): ${endTime - startTime}ms (${candles.length} pts)`);
+                    console.log(`[PERF] Coin Chart (${range}): ${Date.now() - startTime}ms (${candles?.length || 0} pts)`);
                 }
+
                 if (isMounted) {
                     if (candles && candles.length) {
-                        setChartData(mapCandlesToPoints(candles));
+                        safeSetState(setChartData, mapCandlesToPoints(candles));
                     } else {
-                        setChartData([]);
+                        safeSetState(setChartData, []);
                     }
                 }
             } catch (e) {
                 if (isMounted) {
-                    setChartError(e?.message || t('home.refreshErrorTitle'));
-                    setChartData([]);
+                    safeSetState(setChartError, e?.message || 'Error loading chart');
                 }
             } finally {
-                if (isMounted) setChartLoading(false);
+                if (isMounted) safeSetState(setChartLoading, false);
             }
         })();
         return () => { isMounted = false; };
-    }, [sym, currency, range, t, txs]);
+    }, [sym, currency, range, txs, safeSetState]);
 
     const txStats = useMemo(() => {
         return computeCoinTransactionStats(txs, coin?.price || 0, coin?.quantity || 0, {
@@ -262,7 +264,7 @@ export default function CoinScreen() {
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
-                    <ArrowLeft size={24} color={colors.text} />
+                    <Feather name="arrow-left" size={24} color={colors.text} />
                 </TouchableOpacity>
                 <View style={{ alignItems: 'center', flexDirection: 'row' }}>
                     <CoinIcon symbol={sym} imageUrl={coin?.imageUrl} size={32} style={{ marginRight: 10 }} />
@@ -389,7 +391,7 @@ export default function CoinScreen() {
 
                             <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 16 }}>
                                 <TouchableOpacity style={[styles.addTxBtn, { backgroundColor: colors.primary }]} onPress={() => router.push('/add-transaction')}>
-                                    <Plus color={colors.primaryInverse} size={20} />
+                                    <Feather name="plus" color={colors.primaryInverse} size={20} />
                                     <Text style={{ fontWeight: 'bold', fontSize: 14, marginLeft: 8, color: colors.primaryInverse }}>{t('coin.newTransaction')}</Text>
                                 </TouchableOpacity>
                             </View>

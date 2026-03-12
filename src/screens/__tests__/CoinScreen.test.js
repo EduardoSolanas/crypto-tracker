@@ -125,4 +125,36 @@ describe('CoinScreen graph ranges', () => {
             expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'minute', 120, 12);
         });
     });
+
+    it('recomputes graph when switching ranges', async () => {
+        mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
+
+        const { getByText } = render(<CoinScreen />);
+
+        await waitFor(() => {
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'minute', 120, 12);
+        });
+
+        fireEvent.press(getByText('1W'));
+
+        await waitFor(() => {
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 84, 2);
+        });
+    });
+
+    it('recomputes graph when switching to ALL range', async () => {
+        mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
+
+        const { getByText } = render(<CoinScreen />);
+
+        await waitFor(() => {
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'minute', 120, 12);
+        });
+
+        fireEvent.press(getByText('ALL'));
+
+        await waitFor(() => {
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 200, 5);
+        });
+    });
 });

@@ -186,12 +186,10 @@ export const computePortfolioHistory = async ({
             }
             historyPointers[sym] = ptr;
 
-            // If data is too old compared to point, maybe use it anyway if it's the last known price?
-            // Existing logic uses it if within simStep.
-            // Let's stick to existing logic for now.
-            if (hist[ptr].time <= tPoint + simStep) {
-                val += qty * hist[ptr].close;
-            }
+            // Always use the last known price. The pointer is already at the closest
+            // candle at or before tPoint. Requiring a time-window check caused gaps
+            // when candle timestamps didn't align perfectly with simulated time points.
+            val += qty * hist[ptr].close;
         }
         return toLinePoint(tPoint * 1000, val);
     });

@@ -41,15 +41,25 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Publish OTA update
+      - name: Validate EXPO_TOKEN is configured
+        shell: bash
         run: |
-          CHANNEL="${{ github.event.inputs.channel }}"
-          if [ -z "$CHANNEL" ]; then CHANNEL="production"; fi
-
-          MESSAGE="${{ github.event.inputs.message }}"
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="OTA update from ${GITHUB_SHA::7}"
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "EXPO_TOKEN secret is missing. Add it in GitHub -> Settings -> Secrets and variables -> Actions."
+            exit 1
           fi
+
+      - name: Verify Expo authentication
+        run: npx eas-cli whoami --non-interactive
+
+      - name: Publish OTA update
+        shell: bash
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          MESSAGE: ${{ github.event.inputs.message }}
+        run: |
+          CHANNEL="${CHANNEL:-production}"
+          MESSAGE="${MESSAGE:-OTA update from ${GITHUB_SHA::7}}"
 
           npx eas-cli update \
             --branch "$CHANNEL" \

@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 const CC_IMAGE_BASE = 'https://www.cryptocompare.com';
 
 // Local cache directory for icons
-const ICON_CACHE_DIR = FileSystem.cacheDirectory + 'crypto-icons/';
+const getIconCacheDir = () => (FileSystem.cacheDirectory ?? '') + 'crypto-icons/';
 
 // In-memory cache for icon URIs (avoids repeated filesystem checks)
 const memoryCache = {};
@@ -20,9 +20,10 @@ async function ensureCacheDir() {
     if (isWeb) return;
     
     try {
-        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
+        const iconCacheDir = getIconCacheDir();
+        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
         if (!dirInfo.exists) {
-            await FileSystem.makeDirectoryAsync(ICON_CACHE_DIR, { intermediates: true });
+            await FileSystem.makeDirectoryAsync(iconCacheDir, { intermediates: true });
         }
     } catch (_e) {
         console.warn('[IconCache] Failed to create cache directory:', _e.message);
@@ -33,7 +34,7 @@ async function ensureCacheDir() {
  * Get the local file path for a coin icon
  */
 function getLocalPath(symbol) {
-    return ICON_CACHE_DIR + symbol.toUpperCase() + '.png';
+    return getIconCacheDir() + symbol.toUpperCase() + '.png';
 }
 
 /**
@@ -152,9 +153,10 @@ export async function clearIconCache() {
     }
     
     try {
-        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
+        const iconCacheDir = getIconCacheDir();
+        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
         if (dirInfo.exists) {
-            await FileSystem.deleteAsync(ICON_CACHE_DIR, { idempotent: true });
+            await FileSystem.deleteAsync(iconCacheDir, { idempotent: true });
         }
         // Clear memory cache
         Object.keys(memoryCache).forEach(key => delete memoryCache[key]);
@@ -170,14 +172,15 @@ export async function getIconCacheSize() {
     if (isWeb) return 0;
     
     try {
-        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
+        const iconCacheDir = getIconCacheDir();
+        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
         if (!dirInfo.exists) return 0;
         
-        const files = await FileSystem.readDirectoryAsync(ICON_CACHE_DIR);
+        const files = await FileSystem.readDirectoryAsync(iconCacheDir);
         let totalSize = 0;
         
         for (const file of files) {
-            const fileInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR + file);
+            const fileInfo = await FileSystem.getInfoAsync(iconCacheDir + file);
             if (fileInfo.exists && fileInfo.size) {
                 totalSize += fileInfo.size;
             }
@@ -188,3 +191,5 @@ export async function getIconCacheSize() {
         return 0;
     }
 }
+
+

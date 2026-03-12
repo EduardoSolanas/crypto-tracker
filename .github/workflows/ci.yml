@@ -28,4 +28,50 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm test -- --runInBand
+        run: npm test -- --runInBand --no-cache
+
+  release-version:
+    needs: test-and-lint
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump synchronized app version
+        id: bump
+        shell: bash
+        run: |
+          VERSION_JSON=$(node scripts/bump-release-version.mjs)
+          echo "$VERSION_JSON"
+          NEXT_VERSION=$(echo "$VERSION_JSON" | node -e "let b='';process.stdin.on('data',d=>b+=d).on('end',()=>process.stdout.write(JSON.parse(b).nextVersion));")
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag release version
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No version changes to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          VERSION="${{ steps.bump.outputs.next_version }}"
+          git add package.json package-lock.json app.json android/app/build.gradle
+          git commit -m "chore(release): v${VERSION} [skip ci]"
+          git tag "v${VERSION}"
+
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "v${VERSION}"
