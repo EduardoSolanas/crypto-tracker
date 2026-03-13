@@ -2,6 +2,8 @@
 // Mock Dimensions
 import { Dimensions } from 'react-native';
 
+// ViewConfigIgnore is now mapped via jest.config.js moduleNameMapper
+
 jest.mock('react-native-gesture-handler', () => {
     return {
         Swipeable: jest.fn(),

@@ -4,11 +4,11 @@ module.exports = {
     moduleNameMapper: {
         'react-native-wagmi-charts': '<rootDir>/src/__mocks__/react-native-wagmi-charts',
         'react-native-chart-kit': '<rootDir>/src/__mocks__/react-native-chart-kit',
-        '^react-native/Libraries/NativeComponent/ViewConfigIgnore(\\.js)?$': '<rootDir>/src/__mocks__/ViewConfigIgnore.js',
-        '^\\./ViewConfigIgnore(\\.js)?$': '<rootDir>/src/__mocks__/ViewConfigIgnore.js',
+        // Mock ViewConfigIgnore to avoid Flow syntax parsing issues
+        'react-native/Libraries/NativeComponent/ViewConfigIgnore': '<rootDir>/src/__mocks__/ViewConfigIgnore.js',
     },
     transformIgnorePatterns: [
-        'node_modules/(?!((jest-)?react-native|@react-native|expo(nent)?|@expo(nent)?/.*|@react-navigation/.*|react-native-svg|react-native-gesture-handler|react-native-reanimated))',
+        'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@react-navigation/.*|react-native-svg|react-native-gesture-handler|react-native-reanimated|react-native-safe-area-context))',
     ],
     setupFilesAfterEnv: [
         '@testing-library/jest-native/extend-expect'
