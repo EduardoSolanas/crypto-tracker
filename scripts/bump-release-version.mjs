@@ -55,10 +55,14 @@ let currentVersionCode = 1;
 let gradleContent = null;
 
 if (fs.existsSync(androidGradlePath)) {
-  gradleContent = fs.readFileSync(androidGradlePath, 'utf8');
-  const versionCodeMatch = gradleContent.match(/versionCode\s+(\d+)/);
-  if (versionCodeMatch) {
-    currentVersionCode = Number.parseInt(versionCodeMatch[1], 10);
+  try {
+    gradleContent = fs.readFileSync(androidGradlePath, 'utf8');
+    const versionCodeMatch = gradleContent.match(/versionCode\s+(\d+)/);
+    if (versionCodeMatch) {
+      currentVersionCode = Number.parseInt(versionCodeMatch[1], 10);
+    }
+  } catch (e) {
+    // Ignore error if file cannot be read, falls back to app.json
   }
 } else if (app.expo && app.expo.android && app.expo.android.versionCode) {
   currentVersionCode = app.expo.android.versionCode;

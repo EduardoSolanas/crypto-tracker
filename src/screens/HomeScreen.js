@@ -410,7 +410,21 @@ export default function HomeScreen() {
                             </View>
                             <View style={styles.assetRight}>
                                 <Text style={[styles.assetValue, { color: colors.text }]}>{formatMoney(item.value, currency)}</Text>
-                                <Text style={[styles.assetPrice, { color: colors.textSecondary }]}>{formatMoney(item.price, currency)}</Text>
+                                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                    <Text style={[styles.assetPrice, { color: colors.textSecondary, marginRight: 8 }]}>
+                                        {formatMoney(item.price, currency)}
+                                    </Text>
+                                    {coinDeltas[item.symbol] && (
+                                        <Text style={{
+                                            color: coinDeltas[item.symbol].pct >= 0 ? '#22c55e' : '#ef4444',
+                                            fontSize: 12,
+                                            fontWeight: 'bold'
+                                        }}>
+                                            {coinDeltas[item.symbol].pct >= 0 ? '+' : ''}
+                                            {coinDeltas[item.symbol].pct.toFixed(2)}%
+                                        </Text>
+                                    )}
+                                </View>
                             </View>
                         </TouchableOpacity>
                     ))
@@ -513,4 +527,3 @@ const styles = StyleSheet.create({
         marginRight: 4,
     },
 });
-

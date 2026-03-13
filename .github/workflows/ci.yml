@@ -7,6 +7,9 @@ on:
       - main
       - master
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
@@ -69,9 +72,41 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           VERSION="${{ steps.bump.outputs.next_version }}"
-          git add package.json package-lock.json app.json android/app/build.gradle
+          git add package.json package-lock.json app.json
           git commit -m "chore(release): v${VERSION} [skip ci]"
           git tag "v${VERSION}"
 
           git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "v${VERSION}"
+
+  deploy-ota:
+    name: Deploy OTA Update
+    needs: [test-and-lint, release-version]
+    # Run only on push to main/master, and if it's not a bot/skip-ci commit
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Publish OTA update
+        run: |
+          npx eas-cli update --branch production --message "Automated update from CI" --non-interactive
