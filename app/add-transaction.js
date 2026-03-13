@@ -126,7 +126,12 @@ export default function AddTransactionScreen() {
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+                <TouchableOpacity
+                    onPress={() => router.back()}
+                    style={styles.iconBtn}
+                    testID="add-tx-back-button"
+                    accessibilityLabel="add-tx-back-button"
+                >
                     <Feather name="arrow-left" color={colors.text} size={24} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{t('addTransaction.title')}</Text>
@@ -143,6 +148,8 @@ export default function AddTransactionScreen() {
                                 key={t}
                                 style={[styles.typeBtn, type === t && (t === 'BUY' ? styles.bgGreen : styles.bgRed)]}
                                 onPress={() => setType(t)}
+                                testID={`add-tx-type-${t.toLowerCase()}`}
+                                accessibilityLabel={`add-tx-type-${t.toLowerCase()}`}
                             >
                                 <Text style={[styles.typeText, { color: colors.textSecondary }, type === t && styles.textWhite]}>{t}</Text>
                             </TouchableOpacity>
@@ -158,6 +165,8 @@ export default function AddTransactionScreen() {
                             onChangeText={t => setSymbol(t.toUpperCase())}
                             placeholder="BTC"
                             placeholderTextColor={colors.textSecondary}
+                            testID="add-tx-symbol-input"
+                            accessibilityLabel="add-tx-symbol-input"
                         />
                     </View>
 
@@ -171,6 +180,8 @@ export default function AddTransactionScreen() {
                             placeholder="0.00"
                             placeholderTextColor={colors.textSecondary}
                             keyboardType="numeric"
+                            testID="add-tx-amount-input"
+                            accessibilityLabel="add-tx-amount-input"
                         />
                     </View>
 
@@ -184,6 +195,8 @@ export default function AddTransactionScreen() {
                             placeholder="0.00"
                             placeholderTextColor={colors.textSecondary}
                             keyboardType="numeric"
+                            testID="add-tx-price-input"
+                            accessibilityLabel="add-tx-price-input"
                         />
                     </View>
 
@@ -196,10 +209,18 @@ export default function AddTransactionScreen() {
                             onChangeText={setDate}
                             placeholder="2023-01-01"
                             placeholderTextColor={colors.textSecondary}
+                            testID="add-tx-date-input"
+                            accessibilityLabel="add-tx-date-input"
                         />
                     </View>
 
-                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={handleSave} disabled={loading}>
+                    <TouchableOpacity
+                        style={[styles.saveBtn, { backgroundColor: colors.primary }]}
+                        onPress={handleSave}
+                        disabled={loading}
+                        testID="add-tx-save-button"
+                        accessibilityLabel="add-tx-save-button"
+                    >
                         {loading ? <ActivityIndicator color={colors.primaryInverse} /> : (
                             <>
                                 <Feather name="check" color={colors.primaryInverse} size={20} />
@@ -235,4 +256,3 @@ const styles = StyleSheet.create({
     saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, marginTop: 16 },
     saveText: { fontWeight: 'bold', fontSize: 16, marginLeft: 8 }
 });
-

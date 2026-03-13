@@ -1,3 +1,4 @@
+process.env.EXPO_OS = process.env.EXPO_OS || 'test';
 console.log('--- LOADING JEST CONFIG ---');
 module.exports = {
     preset: 'jest-expo',
@@ -21,7 +22,7 @@ module.exports = {
         '^.+\\.(js|jsx|ts|tsx)$': 'babel-jest',
     },
     setupFilesAfterEnv: [
-        '@testing-library/jest-native/extend-expect'
+        '@testing-library/react-native/extend-expect'
     ],
     setupFiles: [
         './jest.setup.js'

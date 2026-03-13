@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Guard React renderer versions
+        run: npm run ci:guard
+
       - name: Lint
         run: npm run lint
 
@@ -37,6 +40,8 @@ jobs:
     needs: test-and-lint
     if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.next_version }}
     permissions:
       contents: write
 
@@ -72,22 +77,52 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           VERSION="${{ steps.bump.outputs.next_version }}"
+          TAG="v${VERSION}"
+
+          # Idempotency guard: CI reruns should not fail if this version tag already exists.
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null || git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "Tag ${TAG} already exists. Skipping release commit/tag."
+            exit 0
+          fi
+
           git add package.json package-lock.json app.json
-          git commit -m "chore(release): v${VERSION} [skip ci]"
-          git tag "v${VERSION}"
+          git commit -m "chore(release): ${TAG} [skip ci]"
+          git tag "${TAG}"
 
           git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "v${VERSION}"
+          git push origin "${TAG}"
 
-  deploy-ota:
-    name: Deploy OTA Update
+  resolve-version:
+    name: Resolve App Version
     needs: [test-and-lint, release-version]
-    # Run only on push to main/master, and if it's not a bot/skip-ci commit
+    if: always() && !cancelled() && needs.test-and-lint.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        run: |
+          VERSION="${{ needs.release-version.outputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using app version: $VERSION"
+
+  android-full-build:
+    name: Build Android Binary
+    needs: [test-and-lint, release-version, resolve-version]
     if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,7 +141,87 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-      
-      - name: Publish OTA update
+
+      - name: Build Android production binary
         run: |
-          npx eas-cli update --branch production --message "Automated update from CI" --non-interactive
+          echo "Starting Android build for v${{ needs.resolve-version.outputs.version }}"
+          npx eas-cli build --platform android --profile production --non-interactive
+
+  deploy-ota-test:
+    name: Deploy OTA Test Channel
+    needs: [test-and-lint, resolve-version]
+    if: always() && !cancelled() && needs.test-and-lint.result == 'success' && needs.resolve-version.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Expo token availability
+        id: expo_token
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Expo and EAS
+        if: steps.expo_token.outputs.has_token == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish OTA test update
+        if: steps.expo_token.outputs.has_token == 'true'
+        run: |
+          npx eas-cli update --branch test --message "v${{ needs.resolve-version.outputs.version }} test update ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" --non-interactive
+
+      - name: Skip test OTA (no EXPO_TOKEN)
+        if: steps.expo_token.outputs.has_token != 'true'
+        run: echo "EXPO_TOKEN not set; skipping test OTA publish."
+
+  deploy-ota:
+    name: Deploy OTA Update
+    needs: [test-and-lint, release-version, resolve-version]
+    # Run only on push to main/master, and if it's not a bot/skip-ci commit
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish OTA production update
+        run: |
+          npx eas-cli update --branch production --message "v${{ needs.resolve-version.outputs.version }} automated production update from CI" --non-interactive

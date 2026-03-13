@@ -207,3 +207,17 @@ jest.mock('react-native-svg', () => {
         Stop: MockStop,
     };
 });
+
+// Expo modules expect EXPO_OS to be inlined; set a stable test fallback in Jest.
+if (!process.env.EXPO_OS) {
+    process.env.EXPO_OS = 'test';
+}
+
+const originalConsoleWarn = console.warn;
+console.warn = (...args) => {
+    const first = args?.[0];
+    if (typeof first === 'string' && first.includes('The global process.env.EXPO_OS is not defined')) {
+        return;
+    }
+    originalConsoleWarn(...args);
+};
