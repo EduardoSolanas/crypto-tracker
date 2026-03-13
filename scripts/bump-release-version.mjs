@@ -50,13 +50,20 @@ const nextVersion = bumpPatch(currentVersion);
 
 const lock = readJson(packageLockPath);
 const app = readJson(appJsonPath);
-const gradle = fs.readFileSync(androidGradlePath, 'utf8');
 
-const versionCodeMatch = gradle.match(/versionCode\s+(\d+)/);
-if (!versionCodeMatch) {
-  throw new Error('Could not parse current versionCode from android/app/build.gradle');
+let currentVersionCode = 1;
+let gradleContent = null;
+
+if (fs.existsSync(androidGradlePath)) {
+  gradleContent = fs.readFileSync(androidGradlePath, 'utf8');
+  const versionCodeMatch = gradleContent.match(/versionCode\s+(\d+)/);
+  if (versionCodeMatch) {
+    currentVersionCode = Number.parseInt(versionCodeMatch[1], 10);
+  }
+} else if (app.expo && app.expo.android && app.expo.android.versionCode) {
+  currentVersionCode = app.expo.android.versionCode;
 }
-const currentVersionCode = Number.parseInt(versionCodeMatch[1], 10);
+
 const nextVersionCode = currentVersionCode + 1;
 
 pkg.version = nextVersion;
@@ -69,14 +76,27 @@ if (!app.expo) {
   throw new Error('app.json missing expo object');
 }
 app.expo.version = nextVersion;
+if (!app.expo.android) {
+  app.expo.android = {};
+}
+app.expo.android.versionCode = nextVersionCode;
+if (!app.expo.ios) {
+  app.expo.ios = {};
+}
+app.expo.ios.buildNumber = String(nextVersionCode);
 
-const nextGradle = updateGradleContent(gradle, nextVersion, nextVersionCode);
+let nextGradle = null;
+if (gradleContent) {
+  nextGradle = updateGradleContent(gradleContent, nextVersion, nextVersionCode);
+}
 
 if (!dryRun) {
   writeJson(packageJsonPath, pkg);
   writeJson(packageLockPath, lock);
   writeJson(appJsonPath, app);
-  fs.writeFileSync(androidGradlePath, nextGradle, 'utf8');
+  if (nextGradle) {
+    fs.writeFileSync(androidGradlePath, nextGradle, 'utf8');
+  }
 }
 
 process.stdout.write(

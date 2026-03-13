@@ -22,7 +22,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.belcebuu.CryptoPortfolio"
+      "package": "com.belcebuu.CryptoPortfolio",
+      "versionCode": 2
     },
     "web": {
       "output": "static",

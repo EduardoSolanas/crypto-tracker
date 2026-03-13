@@ -73,9 +73,9 @@ jest.mock('../../utils/portfolioHistory', () => ({
 
 jest.mock('../../components/CoinIcon', () => {
     const React = require('react');
-    const { View } = require('react-native');
+    // Use string element type to avoid importing react-native which triggers Flow parsing issues
     return function MockCoinIcon() {
-        return <View testID="coin-icon" />;
+        return React.createElement('View', { testID: 'coin-icon' });
     };
 });
 

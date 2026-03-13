@@ -3,27 +3,27 @@ import CryptoGraph from '../CryptoGraph';
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
-    const { View, Text } = require('react-native');
+    // Use string element types to avoid importing react-native which triggers Flow parsing issues
 
     const MockView = ({ children, pointerEvents, ...props }) => 
-        React.createElement(View, { ...props, pointerEvents }, children);
+        React.createElement('View', { ...props, pointerEvents }, children);
 
     function LineChartComponent({ children }) {
-        return React.createElement(View, { testID: 'line-chart' }, children);
+        return React.createElement('View', { testID: 'line-chart' }, children);
     }
     LineChartComponent.Provider = MockView;
     LineChartComponent.Path = () => null;
-    LineChartComponent.CursorCrosshair = () => React.createElement(View, { testID: 'cursor-crosshair' });
-    LineChartComponent.PriceText = () => React.createElement(Text, { testID: 'price-text' }, 'Price');
+    LineChartComponent.CursorCrosshair = () => React.createElement('View', { testID: 'cursor-crosshair' });
+    LineChartComponent.PriceText = () => React.createElement('Text', { testID: 'price-text' }, 'Price');
 
     function CandlestickChartComponent({ children }) {
-        return React.createElement(View, { testID: 'candlestick-chart' }, children);
+        return React.createElement('View', { testID: 'candlestick-chart' }, children);
     }
     CandlestickChartComponent.Provider = MockView;
     CandlestickChartComponent.Candles = () => null;
-    CandlestickChartComponent.Crosshair = () => React.createElement(View, { testID: 'crosshair' });
-    CandlestickChartComponent.PriceText = () => React.createElement(Text, { testID: 'candle-price-text' }, 'Price');
-    CandlestickChartComponent.DatetimeText = () => React.createElement(Text, { testID: 'datetime-text' }, 'Date');
+    CandlestickChartComponent.Crosshair = () => React.createElement('View', { testID: 'crosshair' });
+    CandlestickChartComponent.PriceText = () => React.createElement('Text', { testID: 'candle-price-text' }, 'Price');
+    CandlestickChartComponent.DatetimeText = () => React.createElement('Text', { testID: 'datetime-text' }, 'Date');
 
     return {
         LineChart: LineChartComponent,

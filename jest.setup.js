@@ -1,6 +1,48 @@
 /* global jest */
-// Mock Dimensions
-import { Dimensions } from 'react-native';
+// Note: Avoid importing from 'react-native' at top level to prevent Flow syntax parsing issues
+// The Dimensions mock is applied after Jest has fully initialized
+
+// Configure RNTL to use predefined host component names to avoid Flow syntax parsing issues
+import { configure } from '@testing-library/react-native';
+configure({
+    // This tells RNTL what the host component names are, avoiding auto-detection
+    // which can fail due to Flow type syntax in RN internals
+    hostComponentNames: {
+        text: 'Text',
+        textInput: 'TextInput',
+        image: 'Image',
+        switch: 'Switch',
+        scrollView: 'ScrollView',
+        modal: 'Modal',
+    },
+});
+
+// Mock the mockComponent helper to prevent it from calling requireActual
+// which would load react-native internals with Flow syntax
+jest.mock('react-native/jest/mockComponent', () => {
+    const React = require('react');
+    return (moduleName) => {
+        const SuperClass = React.Component;
+        const name = moduleName.replace(/.*\//, '');
+        return class extends SuperClass {
+            static displayName = 'Mock' + name;
+            render() {
+                return React.createElement(name, this.props, this.props.children);
+            }
+        };
+    };
+}, { virtual: true });
+
+// Mock Text component to avoid Flow syntax parsing issues in CI
+// The jest-expo preset's mock tries to use requireActual which triggers Flow parsing
+jest.mock('react-native/Libraries/Text/Text', () => {
+    const React = require('react');
+    const Text = React.forwardRef(({ children, style, testID, ...props }, ref) => {
+        return React.createElement('Text', { ref, style, testID, ...props }, children);
+    });
+    Text.displayName = 'Text';
+    return Text;
+}, { virtual: true });
 
 // ViewConfigIgnore is now mapped via jest.config.js moduleNameMapper
 
@@ -63,7 +105,13 @@ jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({
         },
     },
 }), { virtual: true });
-jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 375, height: 812 });
+
+// Mock Dimensions - use jest.mock instead of spyOn to avoid importing react-native
+jest.mock('react-native/Libraries/Utilities/Dimensions', () => ({
+    get: jest.fn().mockReturnValue({ width: 375, height: 812 }),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+}), { virtual: true });
 
 jest.mock('expo-haptics', () => ({
     impactAsync: jest.fn(),
@@ -116,21 +164,21 @@ jest.mock('react-i18next', () => ({
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
-    const { View } = require('react-native');
-    const MockView = ({ children }) => <View>{children}</View>;
+    // Use string element types to avoid importing react-native which triggers Flow parsing issues
+    const MockView = ({ children }) => React.createElement('View', null, children);
     return {
         CandlestickChart: {
             Provider: MockView,
             Candles: () => null,
             Crosshair: () => null,
-            PriceText: ({ style, children }) => <View style={style}>{children}</View>,
-            DatetimeText: ({ style, children }) => <View style={style}>{children}</View>,
+            PriceText: ({ style, children }) => React.createElement('View', { style }, children),
+            DatetimeText: ({ style, children }) => React.createElement('View', { style }, children),
         },
         LineChart: {
             Provider: MockView,
             Path: () => null,
             CursorCrosshair: () => null,
-            PriceText: ({ style, children }) => <View style={style}>{children}</View>,
+            PriceText: ({ style, children }) => React.createElement('View', { style }, children),
         },
     };
 });
@@ -141,12 +189,12 @@ jest.mock('react-native-chart-kit', () => ({
 
 jest.mock('react-native-svg', () => {
     const React = require('react');
-    const { View } = require('react-native');
-    const MockSvg = ({ children, ...props }) => React.createElement(View, { testID: 'svg', ...props }, children);
-    const MockPath = (props) => React.createElement(View, { testID: 'svg-path', ...props });
-    const MockLine = (props) => React.createElement(View, { testID: 'svg-line', ...props });
-    const MockDefs = ({ children }) => React.createElement(View, null, children);
-    const MockLinearGradient = ({ children }) => React.createElement(View, null, children);
+    // Use string element types to avoid importing react-native which triggers Flow parsing issues
+    const MockSvg = ({ children, ...props }) => React.createElement('View', { testID: 'svg', ...props }, children);
+    const MockPath = (props) => React.createElement('View', { testID: 'svg-path', ...props });
+    const MockLine = (props) => React.createElement('View', { testID: 'svg-line', ...props });
+    const MockDefs = ({ children }) => React.createElement('View', null, children);
+    const MockLinearGradient = ({ children }) => React.createElement('View', null, children);
     const MockStop = () => null;
     return {
         __esModule: true,

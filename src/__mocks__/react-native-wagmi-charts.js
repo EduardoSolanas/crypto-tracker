@@ -1,12 +1,12 @@
 const React = require('react');
-const { View, Text } = require('react-native');
+// Use string element types to avoid importing react-native which triggers Flow parsing issues in CI
 
-const MockView = ({ children }) => React.createElement(View, null, children);
-const MockText = ({ style, children }) => React.createElement(Text, { style }, children);
+const MockView = ({ children }) => React.createElement('View', null, children);
+const MockText = ({ style, children }) => React.createElement('Text', { style }, children);
 
 // Create LineChart as a component function
 function LineChartComponent({ children, width, height }) {
-    return React.createElement(View, { testID: 'line-chart' }, children);
+    return React.createElement('View', { testID: 'line-chart' }, children);
 }
 
 // Add sub-components as properties
@@ -17,7 +17,7 @@ LineChartComponent.PriceText = MockText;
 
 // Create CandlestickChart as a component function
 function CandlestickChartComponent({ children, width, height }) {
-    return React.createElement(View, { testID: 'candlestick-chart' }, children);
+    return React.createElement('View', { testID: 'candlestick-chart' }, children);
 }
 
 // Add sub-components as properties

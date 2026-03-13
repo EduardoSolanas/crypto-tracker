@@ -1,6 +1,6 @@
 const React = require('react');
-const { View } = require('react-native');
+// Use string element types to avoid importing react-native which triggers Flow parsing issues in CI
 
 module.exports = {
-    LineChart: () => React.createElement(View, null),
+    LineChart: () => React.createElement('View', null),
 };

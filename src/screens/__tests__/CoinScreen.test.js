@@ -51,26 +51,26 @@ jest.mock('../../utils/theme', () => ({
 
 jest.mock('../../components/CoinIcon', () => {
     const React = require('react');
-    const { View } = require('react-native');
+    // Use string element type to avoid importing react-native which triggers Flow parsing issues
     return function MockCoinIcon() {
-        return <View testID="coin-icon" />;
+        return React.createElement('View', { testID: 'coin-icon' });
     };
 });
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
-    const { View } = require('react-native');
+    // Use string element types to avoid importing react-native which triggers Flow parsing issues
 
     function LineChartComponent({ children }) {
-        return React.createElement(View, { testID: 'line-chart' }, children);
+        return React.createElement('View', { testID: 'line-chart' }, children);
     }
-    LineChartComponent.Provider = ({ children }) => React.createElement(View, null, children);
+    LineChartComponent.Provider = ({ children }) => React.createElement('View', null, children);
     LineChartComponent.Path = () => null;
 
     function CandlestickChartComponent({ children }) {
-        return React.createElement(View, { testID: 'candlestick-chart' }, children);
+        return React.createElement('View', { testID: 'candlestick-chart' }, children);
     }
-    CandlestickChartComponent.Provider = ({ children }) => React.createElement(View, null, children);
+    CandlestickChartComponent.Provider = ({ children }) => React.createElement('View', null, children);
     CandlestickChartComponent.Candles = () => null;
 
     return {

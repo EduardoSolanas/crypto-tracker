@@ -18,9 +18,10 @@ jest.mock('expo-router', () => ({
 // Vector icons can pull in native setup; replace with a plain component for stable render tests.
 jest.mock('@expo/vector-icons/Feather', () => {
     const React = require('react');
-    const { Text } = require('react-native');
+    // Use a simple span-like element to avoid importing react-native's Text
+    // which triggers Flow syntax parsing issues in CI
     return function MockFeather(props) {
-        return React.createElement(Text, null, props.name || 'icon');
+        return React.createElement('Text', { testID: 'mock-feather' }, props.name || 'icon');
     };
 });
 
