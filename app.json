@@ -3,7 +3,7 @@
     "name": "CryptoPortfolio",
     "slug": "CryptoPortfolio",
     "description": "CryptoPortfolio is a professional mobile crypto tracker for monitoring holdings, imports, PnL, and live market performance with fast charts and reliable local data.",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cryptoportfolio",
@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.belcebuu.CryptoPortfolio",
-      "buildNumber": "3"
+      "buildNumber": "4"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +24,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.belcebuu.CryptoPortfolio",
-      "versionCode": 3
+      "versionCode": 4
     },
     "web": {
       "output": "static",
