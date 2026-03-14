@@ -1,12 +1,44 @@
-import { Dimensions, Text, View } from 'react-native';
+import { Dimensions, Text, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop, Line } from 'react-native-svg';
 import { useTheme } from '../utils/theme';
+import { useTranslation } from 'react-i18next';
 
-const formatYLabel = (val, currency) => {
-    if (!val) return '';
+const formatYLabel = (val, currency, fractionDigits) => {
+    if (val === null || val === undefined) return '';
     const n = Number(val);
     if (isNaN(n)) return '';
-    return n.toLocaleString(undefined, { maximumFractionDigits: 0, style: 'currency', currency: currency || 'USD' });
+    return n.toLocaleString(undefined, {
+        style: 'currency',
+        currency: currency || 'USD',
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits,
+    });
+};
+
+const getStartingFractionDigits = (maxAbsValue) => {
+    if (maxAbsValue >= 1000) return 0;
+    if (maxAbsValue >= 100) return 1;
+    if (maxAbsValue >= 1) return 2;
+    if (maxAbsValue >= 0.01) return 4;
+    return 6;
+};
+
+const getAxisLabels = (min, max, currency) => {
+    const maxAbsValue = Math.max(Math.abs(min || 0), Math.abs(max || 0));
+    const startDigits = getStartingFractionDigits(maxAbsValue);
+
+    for (let digits = startDigits; digits <= 8; digits++) {
+        const maxLabel = formatYLabel(max, currency, digits);
+        const minLabel = formatYLabel(min, currency, digits);
+        if (maxLabel !== minLabel) {
+            return { maxLabel, minLabel };
+        }
+    }
+
+    return {
+        maxLabel: formatYLabel(max, currency, 8),
+        minLabel: formatYLabel(min, currency, 8),
+    };
 };
 
 export default function CryptoGraph({
@@ -15,14 +47,40 @@ export default function CryptoGraph({
     width,
     height = 220,
     color = '#22c55e',
-    currency = 'EUR'
+    currency = 'EUR',
+    range,
+    onRangeChange,
+    loading = false,
+    error = ''
 }) {
     const { colors, isDark } = useTheme();
+    const { t } = useTranslation();
 
-    if (!data || data.length === 0) return null;
+    if (loading) {
+        return (
+            <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator color={colors.text} />
+            </View>
+        );
+    }
+
+    if (error) {
+        return (
+            <View style={{ height, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                <Text style={{ color: '#ef4444', textAlign: 'center', marginBottom: 8 }}>{error}</Text>
+            </View>
+        );
+    }
+
+    if (!data || data.length === 0) {
+        return (
+            <View style={{ width: 0, height: 0 }} testID="line-chart">
+            </View>
+        );
+    }
 
     const screenWidth = width || Dimensions.get('window').width;
-    const chartWidth = screenWidth - 50;
+    const chartWidth = screenWidth; // full width — labels are overlaid
 
     const isCandlestick = type === 'candle' || type === 'candlestick';
 
@@ -31,7 +89,7 @@ export default function CryptoGraph({
     const lows = data.map(d => d.low || d.value || d.close || 0);
     const max = isCandlestick ? Math.max(...highs) : Math.max(...values);
     const min = isCandlestick ? Math.min(...lows) : Math.min(...values);
-    const range = max - min || 1;
+    const rangeVal = max - min || 1;
 
     const padding = 20;
     const chartHeight = height - padding * 2;
@@ -71,7 +129,7 @@ export default function CryptoGraph({
     // Build SVG path for the line
     const points = interpolated.map((v, i) => {
         const x = interpolated.length > 1 ? (i / (interpolated.length - 1)) * chartWidth : chartWidth / 2;
-        const y = padding + chartHeight - ((v - min) / range) * chartHeight;
+        const y = padding + chartHeight - ((v - min) / rangeVal) * chartHeight;
         return { x, y };
     });
 
@@ -89,47 +147,82 @@ export default function CryptoGraph({
         fillPath = linePath + ` L ${points[points.length - 1].x} ${height} L ${points[0].x} ${height} Z`;
     }
 
+    const ranges = ['1H', '1D', '1W', '1M', '1Y', 'ALL'];
+    const axisLabels = getAxisLabels(min, max, currency);
     const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
 
     return (
-        <View style={{ flexDirection: 'row', height }} pointerEvents="none">
-            <View style={{ width: chartWidth, height }} testID={isCandlestick ? 'candlestick-chart' : 'line-chart'}>
-                <Svg width={chartWidth} height={height}>
-                    <Defs>
-                        <LinearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
-                            <Stop offset="0" stopColor={color} stopOpacity="0.15" />
-                            <Stop offset="1" stopColor={color} stopOpacity="0.01" />
-                        </LinearGradient>
-                    </Defs>
+        <View style={{ height: height + 60 }}>
+            {/* Chart fills full width; Y-axis labels float over the right edge */}
+            <View style={{ width: screenWidth, height }} pointerEvents="none">
+                <View style={{ width: chartWidth, height }} testID={isCandlestick ? 'candlestick-chart' : 'line-chart'}>
+                    <Svg width={chartWidth} height={height}>
+                        <Defs>
+                            <LinearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
+                                <Stop offset="0" stopColor={color} stopOpacity="0.15" />
+                                <Stop offset="1" stopColor={color} stopOpacity="0.01" />
+                            </LinearGradient>
+                        </Defs>
 
-                    {/* Grid lines */}
-                    <Line x1={0} y1={padding} x2={chartWidth} y2={padding} stroke={gridColor} strokeWidth={1} />
-                    <Line x1={0} y1={height - padding} x2={chartWidth} y2={height - padding} stroke={gridColor} strokeWidth={1} />
+                        {/* Grid lines */}
+                        <Line x1={0} y1={padding} x2={chartWidth} y2={padding} stroke={gridColor} strokeWidth={1} />
+                        <Line x1={0} y1={height - padding} x2={chartWidth} y2={height - padding} stroke={gridColor} strokeWidth={1} />
 
-                    {/* Area fill */}
-                    {fillPath ? (
-                        <Path d={fillPath} fill="url(#fillGrad)" />
-                    ) : null}
+                        {/* Area fill */}
+                        {fillPath ? (
+                            <Path d={fillPath} fill="url(#fillGrad)" />
+                        ) : null}
 
-                    {/* Line */}
-                    {linePath ? (
-                        <Path
-                            d={linePath}
-                            fill="none"
-                            stroke={color}
-                            strokeWidth={2.5}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                    ) : null}
-                </Svg>
+                        {/* Line */}
+                        {linePath ? (
+                            <Path
+                                d={linePath}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={2.5}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        ) : null}
+                    </Svg>
+                </View>
+
+                {/* Y-Axis Labels — absolutely positioned over the right side of the chart */}
+                <View style={{
+                    position: 'absolute',
+                    right: 6,
+                    top: 0,
+                    bottom: 0,
+                    justifyContent: 'space-between',
+                    paddingTop: 4,
+                    paddingBottom: 4,
+                    alignItems: 'flex-end',
+                }}>
+                    <Text testID="graph-y-max" style={{ color: isDark ? colors.text : colors.textSecondary, fontSize: 11 }}>{axisLabels.maxLabel}</Text>
+                    <Text testID="graph-y-min" style={{ color: isDark ? colors.text : colors.textSecondary, fontSize: 11 }}>{axisLabels.minLabel}</Text>
+                </View>
             </View>
 
-            {/* Y-Axis Labels */}
-            <View style={{ width: 50, justifyContent: 'space-between', paddingVertical: 10, alignItems: 'flex-end', paddingRight: 8 }}>
-                <Text testID="graph-y-max" style={{ color: colors.textSecondary, fontSize: 10 }}>{formatYLabel(max, currency)}</Text>
-                <Text testID="graph-y-min" style={{ color: colors.textSecondary, fontSize: 10 }}>{formatYLabel(min, currency)}</Text>
-            </View>
+            {onRangeChange && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 16 }}>
+                    {ranges.map(r => (
+                        <TouchableOpacity
+                            key={r}
+                            onPress={() => onRangeChange(r)}
+                            style={[
+                                { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+                                range === r && { backgroundColor: colors.surfaceElevated }
+                            ]}
+                        >
+                            <Text style={{
+                                fontSize: 13,
+                                fontWeight: '600',
+                                color: range === r ? colors.text : colors.textSecondary
+                            }}>{r}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            )}
         </View>
     );
 }

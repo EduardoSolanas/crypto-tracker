@@ -22,7 +22,6 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
       "package": "com.belcebuu.CryptoPortfolio",
       "versionCode": 3
     },
@@ -31,16 +30,17 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/branding-source.png",
-          "imageWidth": 320,
+          "image": "./assets/images/android-icon-monochrome.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#0F2B4A",
+          "backgroundColor": "#000000",
           "dark": {
-            "backgroundColor": "#070F1C"
+            "backgroundColor": "#000000"
           }
         }
       ],

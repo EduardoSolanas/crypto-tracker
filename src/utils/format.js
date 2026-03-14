@@ -11,11 +11,14 @@ export const formatMoney = (val, cur = 'EUR') => {
         return new Intl.NumberFormat(undefined, {
             style: 'currency',
             currency: cur || 'EUR',
-            minimumFractionDigits: 2,
+            minimumFractionDigits: 0,
             maximumFractionDigits: 2,
         }).format(v);
     } catch (_e) {
-        return `${cur} ${v.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+        const rounded = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.00$/, '');
+        const [intPart, fracPart] = rounded.split('.');
+        const withGroups = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return `${cur} ${fracPart ? `${withGroups}.${fracPart}` : withGroups}`;
     }
 };
 

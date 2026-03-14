@@ -110,6 +110,7 @@
     "avgBuyPrice": "Avg. Buy Price",
     "avgSellPrice": "Avg. Sell Price",
     "transactionsCount": "# Transactions",
+    "totalReturnPct": "Total Return",
     "newTransaction": "New Transaction",
     "priceLabel": "Price ({{sym}}/{{currency}})",
     "amountAdded": "Amount Added",

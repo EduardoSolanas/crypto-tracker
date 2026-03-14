@@ -33,14 +33,19 @@ jest.mock('react-native-wagmi-charts', () => {
 
 describe('CryptoGraph', () => {
     describe('Basic Rendering', () => {
-        it('renders null when no data is provided', () => {
+        it('renders empty view when no data is provided', () => {
             const { queryByTestId } = render(<CryptoGraph data={[]} />);
-            expect(queryByTestId('line-chart')).toBeNull();
+            // When no data is provided, CryptoGraph returns an empty view with testID="line-chart" but width/height 0
+            const chart = queryByTestId('line-chart');
+            expect(chart).toBeTruthy();
+            expect(chart.props.style.width).toBe(0);
         });
 
-        it('renders null when data is undefined', () => {
+        it('renders empty view when data is undefined', () => {
             const { queryByTestId } = render(<CryptoGraph data={undefined} />);
-            expect(queryByTestId('line-chart')).toBeNull();
+            const chart = queryByTestId('line-chart');
+            expect(chart).toBeTruthy();
+            expect(chart.props.style.width).toBe(0);
         });
     });
 

@@ -32,6 +32,12 @@ const debugLog = (...args) => {
     }
 };
 
+const sortPortfolioByValueDesc = (items) => {
+    const rows = Array.isArray(items) ? [...items] : [];
+    rows.sort((a, b) => Number(b?.value || 0) - Number(a?.value || 0));
+    return rows;
+};
+
 export default function HomeScreen() {
     const { colors, isDark } = useTheme();
     const { t } = useTranslation();
@@ -132,7 +138,7 @@ export default function HomeScreen() {
             }
         }
 
-        if (toFetch.length === 0) return kept;
+        if (toFetch.length === 0) return sortPortfolioByValueDesc(kept);
 
         debugLog(`[SmartFetch] Fetching ${toFetch.length} items (Cached: ${kept.length})`);
 
@@ -143,9 +149,7 @@ export default function HomeScreen() {
         const newItems = await fetchPortfolioPrices(subsetMap, currency);
 
         // Merge
-        const merged = [...kept, ...newItems];
-        merged.sort((a, b) => b.value - a.value);
-        return merged;
+        return sortPortfolioByValueDesc([...kept, ...newItems]);
     }, [currency]);
 
     // Compute History with dynamic range support
@@ -261,7 +265,7 @@ export default function HomeScreen() {
 
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
-            setPortfolio(p);
+            setPortfolio(sortPortfolioByValueDesc(p));
             computeHistory(allTxns, p, currency, range);
 
             Alert.alert(
@@ -281,12 +285,12 @@ export default function HomeScreen() {
             const holdings = await getEffectiveHoldings();
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
-            setPortfolio(p);
+            setPortfolio(sortPortfolioByValueDesc(p));
             computeHistory(allTxns, p, currency, range);
         } catch (e) {
             const cached = await loadCache();
             if (cached) {
-                setPortfolio(cached.portfolio);
+                setPortfolio(sortPortfolioByValueDesc(cached.portfolio));
                 setChartData(cached.chartData);
                 setDelta(cached.delta);
                 Alert.alert(tr('home.offlineTitle', 'Offline'), tr('home.offlineMessage', 'Using cached data (API Error)'));

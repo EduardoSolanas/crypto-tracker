@@ -32,12 +32,11 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
     const fxRate = quoteCurrency === currency ? 1 : Number(fxRates?.[quoteCurrency] || 0);
     const normalizedQuoteAmount = fxRate > 0 ? (transaction.quote_amount || 0) * fxRate : (quoteCurrency === currency ? (transaction.quote_amount || 0) : 0);
 
-    // Calculate actual delta for this transaction
     const purchasePrice = transaction.amount > 0 ? normalizedQuoteAmount / transaction.amount : 0;
     const currentPrice = coinPrice || 0;
     const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
     const deltaVal = (currentPrice - purchasePrice) * transaction.amount;
-    const deltaColor = deltaVal >= 0 ? '#22c55e' : '#ef4444';
+    const deltaColor = deltaVal >= 0 ? colors.success : colors.error;
 
     return (
         <View style={[styles.txCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -45,37 +44,37 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                 <View style={[styles.txBadge, isBuy ? styles.bgGreen : styles.bgRed]}>
                     <Text style={[styles.txBadgeText, isBuy ? styles.textGreen : styles.textRed]}>{transaction.way}</Text>
                 </View>
-                <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr} {t('coin.viaManual')}</Text>
-                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={{ marginLeft: 'auto' }}>
+                <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr}</Text>
+                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={styles.txHeaderOptions}>
                     <Feather name="more-vertical" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
             </View>
 
             <View style={styles.txBody}>
                 <View style={styles.txRow}>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.txColLeft}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.priceLabel', { sym, currency })}</Text>
                         <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(purchasePrice, currency)}</Text>
                     </View>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.txColRight}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.amountAdded') : t('coin.amountRemoved')}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatNumber(transaction.amount, 6)}</Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>{formatNumber(transaction.amount, 2)}</Text>
                     </View>
                 </View>
-                <View style={[styles.txRow, { marginTop: 12 }]}>
-                    <View style={{ flex: 1 }}>
+                <View style={[styles.txRow, styles.txRowGap]}>
+                    <View style={styles.txColLeft}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.costInclFee') : t('coin.received')}</Text>
                         <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(normalizedQuoteAmount, currency)}</Text>
                     </View>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.txColRight}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.currentWorth')}</Text>
                         <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(transaction.amount * currentPrice, currency)}</Text>
                     </View>
                 </View>
 
-                <View style={{ marginTop: 12 }}>
+                <View style={styles.txDeltaRow}>
                     <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.delta')}</Text>
-                    <Text style={{ color: deltaColor, fontWeight: 'bold', fontSize: 14 }}>
+                    <Text style={[styles.txDeltaValue, { color: deltaColor }]}>
                         {deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(2)}% ({formatMoney(deltaVal, currency)})
                     </Text>
                 </View>
@@ -94,8 +93,6 @@ export default function CoinScreen() {
     const [currency, setCurrency] = useState('EUR');
     const [txs, setTxs] = useState([]);
     const [coin, setCoin] = useState(null);
-
-    const [activeTab, setActiveTab] = useState('General');
     const [range, setRange] = useState('1D');
     const [chartData, setChartData] = useState([]);
     const [chartLoading, setChartLoading] = useState(false);
@@ -131,19 +128,12 @@ export default function CoinScreen() {
             try {
                 const c = await getMeta('currency');
                 if (c) safeSetState(setCurrency, c);
-
                 const holdings = await getHoldingsMap();
                 const portfolio = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, c || 'EUR');
-                if (portfolio && portfolio.length > 0) {
-                    safeSetState(setCoin, portfolio[0]);
-                }
-
+                if (portfolio && portfolio.length > 0) safeSetState(setCoin, portfolio[0]);
                 const transactions = await listTransactionsBySymbol(sym);
                 safeSetState(setTxs, transactions || []);
-
-                InteractionManager.runAfterInteractions(() => {
-                    safeSetState(setDeferredReady, true);
-                });
+                InteractionManager.runAfterInteractions(() => safeSetState(setDeferredReady, true));
             } catch (e) {
                 if (globalThis.__DEV__) console.error('Initial load error:', e);
             } finally {
@@ -155,13 +145,10 @@ export default function CoinScreen() {
     useEffect(() => {
         const quoteCurrencies = [...new Set(txs.map(t => String(t.quote_currency || t.quoteCurrency || currency).toUpperCase()))];
         if (quoteCurrencies.length === 0) return;
-
         let active = true;
         (async () => {
             const rates = await fetchFxRates(quoteCurrencies, currency);
-            if (active) {
-                safeSetState(setFxRates, rates);
-            }
+            if (active) safeSetState(setFxRates, rates);
         })();
         return () => { active = false; };
     }, [txs, currency, safeSetState]);
@@ -177,25 +164,14 @@ export default function CoinScreen() {
                 const earliestTxMs = txs.length
                     ? Math.min(...txs.map((t) => new Date(t.date_iso).getTime()))
                     : Date.now() - 365 * 24 * 60 * 60 * 1000;
-
                 const params = getCoinChartFetchParams(range, earliestTxMs);
                 const candles = await fetchCandles(sym, currency, params.timeframe, params.limit, params.aggregate);
-
-                if (globalThis.__DEV__) {
-                    console.log(`[PERF] Coin Chart (${range}): ${Date.now() - startTime}ms (${candles?.length || 0} pts)`);
-                }
-
+                if (globalThis.__DEV__) console.log(`[PERF] Coin Chart (${range}): ${Date.now() - startTime}ms (${candles?.length || 0} pts)`);
                 if (isMounted) {
-                    if (candles && candles.length) {
-                        safeSetState(setChartData, mapCandlesToPoints(candles));
-                    } else {
-                        safeSetState(setChartData, []);
-                    }
+                    safeSetState(setChartData, candles?.length ? mapCandlesToPoints(candles) : []);
                 }
             } catch (e) {
-                if (isMounted) {
-                    safeSetState(setChartError, e?.message || 'Error loading chart');
-                }
+                if (isMounted) safeSetState(setChartError, e?.message || 'Error loading chart');
             } finally {
                 if (isMounted) safeSetState(setChartLoading, false);
             }
@@ -204,10 +180,14 @@ export default function CoinScreen() {
     }, [sym, currency, range, txs, safeSetState]);
 
     const txStats = useMemo(() => {
-        return computeCoinTransactionStats(txs, coin?.price || 0, coin?.quantity || 0, {
+        const stats = computeCoinTransactionStats(txs, coin?.price || 0, coin?.quantity || 0, {
             targetCurrency: currency,
             fxRates,
         });
+        const totalGainsPct = stats.totalCostBasis > 0
+            ? (stats.totalGains / stats.totalCostBasis) * 100
+            : 0;
+        return { ...stats, totalGainsPct };
     }, [currency, fxRates, txs, coin]);
 
     const handleDeleteTransaction = useCallback(async (id) => {
@@ -242,10 +222,8 @@ export default function CoinScreen() {
     }, [handleDeleteTransaction, sym, t]);
 
     const transactionList = useMemo(() => {
-        if (!deferredReady && activeTab !== 'Transactions') return null;
-        // Limit to 100 transactions to prevent UI lag on large histories (like BTC)
-        const visibleTxs = txs.slice(0, 100);
-        return visibleTxs.map((transaction) => (
+        if (!txs || txs.length === 0) return null;
+        return txs.slice(0, 100).map((transaction) => (
             <TransactionItem
                 key={transaction.id}
                 transaction={transaction}
@@ -258,7 +236,7 @@ export default function CoinScreen() {
                 t={t}
             />
         ));
-    }, [txs, sym, currency, coin?.price, showTransactionOptions, deferredReady, activeTab, colors, fxRates, t]);
+    }, [txs, sym, currency, coin?.price, showTransactionOptions, colors, fxRates, t]);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -266,14 +244,13 @@ export default function CoinScreen() {
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
                     <Feather name="arrow-left" size={24} color={colors.text} />
                 </TouchableOpacity>
-                <View style={{ alignItems: 'center', flexDirection: 'row' }}>
+                <View style={styles.headerCenter}>
                     <CoinIcon symbol={sym} imageUrl={coin?.imageUrl} size={32} style={{ marginRight: 10 }} />
-                    <View style={{ alignItems: 'center' }}>
+                    <View style={styles.headerCenterText}>
                         <Text style={[styles.headerTitle, { color: colors.text }]}>{sym}</Text>
-                        <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{t('coin.status', { symbol: sym })}</Text>
                     </View>
                 </View>
-                <View style={{ width: 24 }} />
+                <View style={styles.headerSpacer} />
             </View>
 
             {loading ? (
@@ -281,123 +258,105 @@ export default function CoinScreen() {
                     <ActivityIndicator color={colors.text} />
                 </View>
             ) : (
-                <ScrollView contentContainerStyle={{ paddingBottom: 40 }} stickyHeaderIndices={[2]}>
-                    <View style={styles.statsRow}>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{formatNumber(coin?.quantity || 0, 2)}</Text>
-                        </View>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value, currency)}</Text>
-                        </View>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains')}</Text>
-                            <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                {formatMoney(txStats.totalGains, currency)}
-                            </Text>
-                        </View>
-                    </View>
-
-                    <TouchableOpacity style={styles.breakdownBtn}>
-                        <Text style={[styles.breakdownText, { color: colors.textSecondary }]}>{t('coin.showBreakdown')}</Text>
-                    </TouchableOpacity>
-
-                    <View style={{ backgroundColor: colors.background, paddingBottom: 8 }}>
-                        <View style={[styles.tabRow, { borderBottomColor: colors.border }]}>
-                            <TouchableOpacity style={[styles.tabItem, activeTab === 'General' && { ...styles.tabActive, borderBottomColor: colors.text }]} onPress={() => setActiveTab('General')}>
-                                <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'General' && { ...styles.tabTextActive, color: colors.text }]}>{t('coin.generalTab')}</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.tabItem, activeTab === 'Transactions' && { ...styles.tabActive, borderBottomColor: colors.text }]} onPress={() => setActiveTab('Transactions')}>
-                                <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'Transactions' && { ...styles.tabTextActive, color: colors.text }]}>{t('coin.transactionsTab')}</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    <View style={{ display: activeTab === 'General' ? 'flex' : 'none' }}>
-                        <View style={styles.chartSection}>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 }}>
-                                <View>
-                                    <Text style={[styles.bigPrice, { color: colors.text }]}>{formatMoney(coin?.price, currency)}</Text>
-                                    <Text style={[styles.priceChange, { color: coin?.change24h >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                        {formatMoney(coin?.price * (coin?.change24h / 100), currency)}
-                                        ({coin?.change24h >= 0 ? '+' : ''}{coin?.change24h?.toFixed(2)}%)
-                                    </Text>
-                                </View>
-                                <View style={{ alignItems: 'flex-end' }}>
-                                    <Text style={{ color: colors.text, fontWeight: 'bold' }}>{t('coin.market')}</Text>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{sym}/{currency}</Text>
-                                </View>
+                <ScrollView contentContainerStyle={styles.scrollContent}>
+                    {/* ── KPI card: both stats rows wrapped in a surface card ── */}
+                    <View style={styles.kpiCard}>
+                        {/* Row 1: Owned / Market Value / Total Gains */}
+                        <View style={styles.kpiRow}>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
+                                <Text style={[styles.statValue, { color: colors.text }]}>{formatNumber(coin?.quantity || 0, 2)}</Text>
                             </View>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>
+                                <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value, currency)}</Text>
+                            </View>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains')}</Text>
+                                <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                                    {formatMoney(txStats.totalGains, currency)}
+                                </Text>
+                            </View>
+                        </View>
 
-                            {chartLoading ? (
-                                <View style={{ height: 250, justifyContent: 'center', alignItems: 'center' }}>
-                                    <ActivityIndicator color={colors.text} />
-                                </View>
-                            ) : (
-                                <>
-                                    <CryptoGraph type="candle" data={chartData} currency={currency} />
-                                    {!!chartError && (
-                                        <View style={{ alignItems: 'center', marginTop: 8 }}>
-                                            <Text style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>{chartError}</Text>
-                                            <TouchableOpacity
-                                                onPress={refreshData}
-                                                style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.surfaceElevated }}
-                                            >
-                                                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{t('general.retry')}</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    )}
-                                    <View style={styles.rangeRow}>
-                                        {COIN_CHART_RANGES.map(r => (
-                                            <TouchableOpacity
-                                                key={r}
-                                                onPress={() => setRange(r)}
-                                                disabled={chartLoading}
-                                                style={[
-                                                    styles.rangePill,
-                                                    range === r && { ...styles.rangePillActive, backgroundColor: colors.surfaceElevated },
-                                                    chartLoading && { opacity: 0.5 }
-                                                ]}
-                                            >
-                                                <Text style={[
-                                                    styles.rangeText,
-                                                    { color: range === r ? colors.text : colors.textSecondary }
-                                                ]}>{r}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </>
-                            )}
+                        {/* Row 2: Avg Buy / Avg Sell / Total Return */}
+                        <View style={styles.kpiRow}>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice')}</Text>
+                                <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgBuy, currency)}</Text>
+                            </View>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice')}</Text>
+                                <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgSell, currency)}</Text>
+                            </View>
+                            <View style={styles.kpiItem}>
+                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.totalReturnPct')}</Text>
+                                <Text style={[styles.txStatValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                                    {txStats.totalGainsPct >= 0 ? '+' : ''}{txStats.totalGainsPct.toFixed(2)}%
+                                </Text>
+                            </View>
                         </View>
                     </View>
 
-                    <View style={{ display: activeTab === 'Transactions' ? 'flex' : 'none' }}>
-                        <View style={{ paddingHorizontal: 16 }}>
-                            <View style={styles.txStatsGrid}>
-                                <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice')}</Text>
-                                    <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgBuy, currency)}</Text>
-                                </View>
-                                <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice')}</Text>
-                                    <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgSell, currency)}</Text>
-                                </View>
-                                <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.transactionsCount')}</Text>
-                                    <Text style={[styles.txStatValue, { color: colors.text }]}>{txStats.count}</Text>
-                                </View>
+                    <View style={styles.chartSection}>
+                        <View style={styles.chartHeader}>
+                            <View>
+                                <Text style={[styles.bigPrice, { color: colors.text }]}>{formatMoney(coin?.price, currency)}</Text>
+                                <Text style={[styles.priceChange, { color: coin?.change24h >= 0 ? colors.success : colors.error }]}>
+                                    {formatMoney(coin?.price * (coin?.change24h / 100), currency)}
+                                    ({coin?.change24h >= 0 ? '+' : ''}{coin?.change24h?.toFixed(2)}%)
+                                </Text>
                             </View>
+                            <View style={styles.marketPairWrap}>
+                                <Text style={[styles.marketPair, { color: colors.text }]}>{sym}/{String(currency).toUpperCase()}</Text>
+                            </View>
+                        </View>
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 16 }}>
-                                <TouchableOpacity style={[styles.addTxBtn, { backgroundColor: colors.primary }]} onPress={() => router.push('/add-transaction')}>
-                                    <Feather name="plus" color={colors.primaryInverse} size={20} />
-                                    <Text style={{ fontWeight: 'bold', fontSize: 14, marginLeft: 8, color: colors.primaryInverse }}>{t('coin.newTransaction')}</Text>
+                        {chartLoading ? (
+                            <View style={styles.chartLoadingWrap}>
+                                <ActivityIndicator color={colors.text} />
+                            </View>
+                        ) : (
+                            <CryptoGraph
+                                type="candle"
+                                data={chartData}
+                                currency={currency}
+                                range={range}
+                                onRangeChange={setRange}
+                            />
+                        )}
+                        {!!chartError && (
+                            <View style={styles.chartErrorWrap}>
+                                <Text style={[styles.chartErrorText, { color: colors.error }]}>{chartError}</Text>
+                                <TouchableOpacity
+                                    onPress={refreshData}
+                                    style={[styles.chartRetryBtn, { backgroundColor: colors.surfaceElevated }]}
+                                >
+                                    <Text style={[styles.chartRetryText, { color: colors.text }]}>{t('general.retry')}</Text>
                                 </TouchableOpacity>
                             </View>
+                        )}
+                    </View>
 
-                            {transactionList}
+                    <View style={styles.txSectionWrap}>
+                        <View style={styles.txSectionHeader}>
+                            <Text style={[styles.txSectionTitle, { color: colors.text }]}>{t('coin.transactionsTab')}</Text>
+                            {txStats.count > 0 && (
+                                <Text style={[styles.txCountText, { color: colors.textSecondary }]}>#{txStats.count}</Text>
+                            )}
                         </View>
+
+                        <View style={styles.addTxBtnRow}>
+                            <TouchableOpacity
+                                style={[styles.addTxBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => router.push('/add-transaction')}
+                            >
+                                <Feather name="plus" color={colors.primaryInverse} size={20} />
+                                <Text style={[styles.addTxBtnLabel, { color: colors.primaryInverse }]}>{t('coin.newTransaction')}</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {transactionList}
                     </View>
                 </ScrollView>
             )}
@@ -406,46 +365,85 @@ export default function CoinScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1 },
-    header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    headerTitle: { fontSize: 18, fontWeight: 'bold' },
-    headerSub: { fontSize: 12 },
-    backBtn: { padding: 4 },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    statsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-    statLabel: { fontSize: 11, textAlign: 'center' },
-    statValue: { fontSize: 15, fontWeight: 'bold', textAlign: 'center', marginTop: 4 },
-    breakdownBtn: { flexDirection: 'row', justifyContent: 'center', marginBottom: 20 },
-    breakdownText: { fontSize: 13 },
-    tabRow: { flexDirection: 'row', borderBottomWidth: 1 },
-    tabItem: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-    tabActive: { borderBottomWidth: 2 },
-    tabText: { fontWeight: '600' },
-    tabTextActive: {},
-    chartSection: { paddingTop: 16 },
-    bigPrice: { fontSize: 32, fontWeight: 'bold' },
-    priceChange: { fontWeight: 'bold', marginTop: 4 },
-    rangeRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 16 },
-    rangePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-    rangePillActive: {},
-    rangeText: { fontSize: 13, fontWeight: '600' },
-    rangeTextActive: {},
-    txStatsGrid: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 16 },
-    txStatItem: { alignItems: 'center' },
-    txStatLabel: { fontSize: 11, marginBottom: 4 },
-    txStatValue: { fontWeight: 'bold', fontSize: 15 },
-    addTxBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20 },
-    txCard: { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 12 },
-    txHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-    txBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 8, borderWidth: 1 },
-    bgGreen: { borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)' },
-    bgRed: { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)' },
-    txBadgeText: { fontSize: 11, fontWeight: 'bold' },
-    textGreen: { color: '#22c55e' },
-    textRed: { color: '#ef4444' },
-    txHeaderDate: { fontSize: 11 },
-    txBody: {},
-    txRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    txLabel: { fontSize: 11, marginBottom: 4 },
-    txValue: { fontWeight: 'bold', fontSize: 14 },
+    container:        { flex: 1 },
+    scrollContent:    { paddingBottom: 32 },
+
+    // Header
+    header:           { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    headerCenter:     { flexDirection: 'row', alignItems: 'center' },
+    headerCenterText: { alignItems: 'center' },
+    headerSpacer:     { width: 24 },
+    headerTitle:      { fontSize: 18, fontWeight: '700' },
+    backBtn:          { padding: 4 },
+    center:           { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+    // KPI Card — unified surface card replacing the flat rows
+    kpiCard:          { marginHorizontal: 16, marginTop: 8, marginBottom: 16, borderRadius: 16, overflow: 'hidden' },
+    kpiRow:           { flexDirection: 'row', paddingVertical: 14 },
+    kpiItem:          { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+    kpiColDivider:    { width: 1, marginVertical: 8 },
+    kpiRowDivider:    { height: 1 },
+
+    // KPI labels/values (kept for backwards compat)
+    statsRow:         { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+    statLabel:        { fontSize: 11, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
+    statValue:        { fontSize: 16, fontWeight: '700', textAlign: 'center', marginTop: 4 },
+
+    // Secondary KPIs
+    sectionPadding:   { paddingHorizontal: 16 },
+    txStatsGrid:      { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, marginBottom: 12 },
+    txStatItem:       { flex: 1, alignItems: 'center' },
+    txStatLabel:      { fontSize: 11, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
+    txStatValue:      { fontWeight: '600', fontSize: 14, textAlign: 'center' },
+
+    // Chart
+    chartSection:     { paddingTop: 8 },
+    chartHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 16, marginBottom: 8 },
+    bigPrice:         { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+    priceChange:      { fontSize: 14, fontWeight: '600', marginTop: 2 },
+    marketPairWrap:   { alignItems: 'flex-end' },
+    marketPair:       { fontSize: 20, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+
+    // Chart feedback
+    chartLoadingWrap: { height: 250, justifyContent: 'center', alignItems: 'center' },
+    chartErrorWrap:   { alignItems: 'center', marginTop: 8 },
+    chartErrorText:   { fontSize: 12, marginBottom: 8 },
+    chartRetryBtn:    { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
+    chartRetryText:   { fontWeight: '600', fontSize: 12 },
+
+    // Transactions Section
+    txSectionWrap:    { paddingHorizontal: 16, paddingTop: 20, marginTop: 8 },
+    txSectionHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+    txSectionTitle:   { fontSize: 18, fontWeight: '700' },
+    txSectionPct:     { fontSize: 16, fontWeight: '700' },
+    txSectionCount:   { fontSize: 14, fontWeight: '600' },
+    // Pill badge for transaction count
+    txCountBadge:     { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
+    txCountText:      { fontSize: 13, fontWeight: '700' },
+    addTxBtnRow:      { flexDirection: 'row', justifyContent: 'center', marginVertical: 16 },
+    addTxBtn:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 24 },
+    addTxBtnLabel:    { fontWeight: '700', fontSize: 14, marginLeft: 8 },
+
+    // Transaction Card
+    txCard:           { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+    txHeader:         { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    txBadge:          { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 8, borderWidth: 1 },
+    txBadgeText:      { fontSize: 12, fontWeight: '700' },
+    txHeaderDate:     { fontSize: 12 },
+    txHeaderOptions:  { marginLeft: 'auto' },
+    txBody:           {},
+    txRow:            { flexDirection: 'row' },
+    txRowGap:         { marginTop: 12 },
+    txColLeft:        { flex: 1, alignItems: 'flex-start' },
+    txColRight:       { flex: 1, alignItems: 'flex-end' },
+    txLabel:          { fontSize: 12, marginBottom: 4 },
+    txValue:          { fontWeight: '700', fontSize: 15 },
+    txDeltaRow:       { marginTop: 12 },
+    txDeltaValue:     { fontWeight: '700', fontSize: 14 },
+
+    // Shared badge colours
+    bgGreen:          { borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)' },
+    bgRed:            { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)' },
+    textGreen:        { color: '#22c55e' },
+    textRed:          { color: '#ef4444' },
 });
