@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { getCachedIconUri, getIconFallbackUris } from '../utils/iconCache';
+import { getCachedIconUri, getIconFallbackUris, getInitialIconUri } from '../utils/iconCache';
 
 /**
  * CoinIcon component that displays a cryptocurrency icon with local caching
  * Falls back to a colored circle with the coin's first letter if icon fails to load
  */
 export default function CoinIcon({ symbol, imageUrl, size = 40, style }) {
-    const [iconUri, setIconUri] = useState(null);
+    // Use a synchronous initial URI (memory cache hit or remote URL from imageUrl)
+    // to avoid the letter-fallback flash on first render.
+    const [iconUri, setIconUri] = useState(() => getInitialIconUri(symbol, imageUrl));
     const [hasError, setHasError] = useState(false);
     const [fallbackIndex, setFallbackIndex] = useState(0);
-    const [fallbackUris, setFallbackUris] = useState([]);
+    const [fallbackUris, setFallbackUris] = useState(() => getIconFallbackUris(symbol, imageUrl));
 
     useEffect(() => {
         let mounted = true;
@@ -19,10 +21,15 @@ export default function CoinIcon({ symbol, imageUrl, size = 40, style }) {
             try {
                 const uri = await getCachedIconUri(symbol, imageUrl);
                 if (mounted) {
-                    setIconUri(uri);
-                    setHasError(false);
-                    setFallbackUris(getIconFallbackUris(symbol, imageUrl));
-                    setFallbackIndex(0);
+                    setIconUri(prev => {
+                        if (uri !== prev) {
+                            setHasError(false);
+                            setFallbackUris(getIconFallbackUris(symbol, imageUrl));
+                            setFallbackIndex(0);
+                            return uri;
+                        }
+                        return prev;
+                    });
                 }
             } catch (_e) {
                 if (mounted) {

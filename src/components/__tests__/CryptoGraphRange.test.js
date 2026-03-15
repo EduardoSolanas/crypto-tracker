@@ -76,7 +76,7 @@ describe('CryptoGraph Range Selector', () => {
     });
 
     it('renders loading state when loading is true', () => {
-        const { getByTestId, queryByTestId } = render(
+        const { queryByTestId } = render(
             <CryptoGraph data={mockData} loading={true} />
         );
         // ActivityIndicator doesn't have a default testID we are using, but let's check it's there

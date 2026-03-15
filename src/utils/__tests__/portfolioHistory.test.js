@@ -1,4 +1,3 @@
-
 import { computePortfolioHistory } from '../portfolioHistory';
 
 const mockFetchCandles = jest.fn();
@@ -66,9 +65,9 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 80, 1);  // 60 + 20 buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 32, 5);
             expect(result.chartData.length).toBeGreaterThan(0);
-            expect(result.chartData.length).toBeLessThanOrEqual(32); // Max 30 minutes + buffer
+            expect(result.chartData.length).toBeLessThanOrEqual(15);
         });
 
         it('calculates portfolio value correctly over 1 hour', async () => {
@@ -187,7 +186,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 188, 1);  // 168 + 20 buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 62, 4);
         });
 
         it('tracks portfolio value changes over a week', async () => {
@@ -336,7 +335,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 385, 1);  // 365 + 20 buffer
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 142, 3);
         });
 
         it('caps data points at ~100 for performance', async () => {
@@ -365,7 +364,7 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            expect(result.chartData.length).toBeLessThanOrEqual(102); // ~100 + buffer
+            expect(result.chartData.length).toBeLessThanOrEqual(130);
         });
 
         it('calculates long-term gains correctly', async () => {
@@ -419,8 +418,10 @@ describe('computePortfolioHistory', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // For ALL range: daysSinceFirst = 1000 days, capped at 2000, so rLimit = 1000 + 20 buffer = 1020
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 1020, 5);
+            // For ALL range: daysSinceFirst = 1000 days.
+            // rAggregate = ceil(1000/150) = 7
+            // rLimit = ceil(1000/7) = 143. 143+20 = 163.
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 163, 7);
         });
 
         it('handles entire portfolio history from first transaction', async () => {

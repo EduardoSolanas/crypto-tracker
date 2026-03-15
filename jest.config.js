@@ -16,6 +16,7 @@ module.exports = {
         '.*ViewConfig(.js)?$': '<rootDir>/src/__mocks__/ViewConfig.js',
     },
     transformIgnorePatterns: [
+        // better-sqlite3 is a native Node binary — never transform it
         'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|expo-.*|lucide-react-native|react-native-chart-kit|react-native-wagmi-charts)/)',
     ],
     transform: {

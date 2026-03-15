@@ -47,7 +47,7 @@ describe('Range Calculation Logic - Deep Analysis', () => {
             expect(result.chartData.length).toBeLessThanOrEqual(15);
 
             // API should request minute data
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 80, 1);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'minute', 32, 5);
         });
 
         it('1D range generates hourly points (24) - OPTIMIZED', async () => {
@@ -91,8 +91,8 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // 7 days * 24 hours + 20 buffer
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 188, 1);
+            // 7 days * 6 (4-hour) points = 42 + 20 buffer = 62
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'hour', 62, 4);
         });
 
         it('1M range generates daily points (30)', async () => {
@@ -143,12 +143,12 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should have ~50 sampled points (365 days sampled to ~50 points)
-            expect(result.chartData.length).toBeLessThanOrEqual(55);
-            expect(result.chartData.length).toBeGreaterThan(45);
+            // Should have ~122 points (365/3)
+            expect(result.chartData.length).toBeLessThanOrEqual(130);
+            expect(result.chartData.length).toBeGreaterThan(115);
 
-            // Verify API requested 365 days worth + buffer
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 385, 1);
+            // Verify API requested 122 + 20 buffer = 142
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', 142, 3);
         });
 
         it('ALL range calculates days since first transaction', async () => {
@@ -180,15 +180,16 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should request ~500 days of data (days since first txn)
+            // Should request ~125 points (500 days / 4 aggregate)
             expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', expect.any(Number), expect.any(Number));
             const requestedLimit = mockFetchCandles.mock.calls[0][3];
-            expect(requestedLimit).toBeGreaterThanOrEqual(500);
-            expect(requestedLimit).toBeLessThanOrEqual(550);
+            // 500 days / 150 = 3.33 -> agg 4. 500/4 = 125. 125+20 = 145.
+            expect(requestedLimit).toBeGreaterThanOrEqual(140);
+            expect(requestedLimit).toBeLessThanOrEqual(150);
 
-            // Should have ~50 sampled points
-            expect(result.chartData.length).toBeLessThanOrEqual(55);
-            expect(result.chartData.length).toBeGreaterThan(45);
+            // Should have ~125 sampled points
+            expect(result.chartData.length).toBeLessThanOrEqual(135);
+            expect(result.chartData.length).toBeGreaterThan(115);
         });
 
         it('ALL range handles very old transactions (years ago)', async () => {
@@ -220,14 +221,14 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should cap at 2000 days (API limit)
+            // 2000 days / 150 = 13.33 -> agg 14. 2000/14 = 142.8 -> 143. 143+20 = 163.
             expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'USD', 'day', expect.any(Number), expect.any(Number));
             const requestedLimit = mockFetchCandles.mock.calls[0][3];
-            expect(requestedLimit).toBeLessThanOrEqual(2020); // 2000 + buffer
+            expect(requestedLimit).toBeLessThanOrEqual(200);
 
-            // Should still have ~50 sampled points
-            expect(result.chartData.length).toBeLessThanOrEqual(55);
-            expect(result.chartData.length).toBeGreaterThan(45);
+            // Should still have ~143 sampled points
+            expect(result.chartData.length).toBeLessThanOrEqual(160);
+            expect(result.chartData.length).toBeGreaterThan(130);
         });
     });
 
@@ -634,9 +635,9 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should be sampled to ~50 points
-            expect(result.chartData.length).toBeLessThanOrEqual(55);
-            expect(result.chartData.length).toBeGreaterThan(45);
+            // Should be sampled to ~122 points
+            expect(result.chartData.length).toBeLessThanOrEqual(130);
+            expect(result.chartData.length).toBeGreaterThan(110);
         });
 
         it('ALL range samples to ~50 points regardless of data size', async () => {
@@ -667,9 +668,10 @@ describe('Range Calculation Logic - Deep Analysis', () => {
                 fetchCandles: mockFetchCandles
             });
 
-            // Should be sampled to ~50 points
-            expect(result.chartData.length).toBeLessThanOrEqual(55);
-            expect(result.chartData.length).toBeGreaterThan(45);
+            // 1500 / 150 = 10 agg. 1500/10 = 150 points.
+            // Should be sampled to ~150 points
+            expect(result.chartData.length).toBeLessThanOrEqual(160);
+            expect(result.chartData.length).toBeGreaterThan(140);
 
             // First point should be close to first transaction time
             const firstPointTime = result.chartData[0].timestamp / 1000;

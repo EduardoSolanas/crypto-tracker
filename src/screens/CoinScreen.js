@@ -5,8 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
     ActivityIndicator,
     Alert,
-    InteractionManager,
-    ScrollView,
+    FlatList,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -16,12 +15,35 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import CoinIcon from '../components/CoinIcon';
 import CryptoGraph from '../components/CryptoGraph';
 import { fetchCandles, fetchFxRates, fetchPortfolioPrices } from '../cryptoCompare';
-import { getHoldingsMap, getMeta, listTransactionsBySymbol } from '../db';
+import { deleteTransaction, getHoldingsMap, getMeta, listTransactionsBySymbol, syncHoldingsForSymbol } from '../db';
 import { formatMoney, formatNumber } from '../utils/format';
 import { mapCandlesToPoints } from '../utils/chartContracts';
-import { COIN_CHART_RANGES, getCoinChartFetchParams } from '../utils/coinChartRange';
+import { getCoinChartFetchParams } from '../utils/coinChartRange';
 import { computeCoinTransactionStats } from '../utils/transactionCalculations';
 import { useTheme } from '../utils/theme';
+
+const CHART_CACHE_TTL_MS = 5 * 60 * 1000;
+const RANGE_PREFETCH_MAP = {
+    '1H': ['1D'],
+    '1D': ['1H', '1W'],
+    '1W': ['1D', '1M'],
+    '1M': ['1W', '1Y'],
+    '1Y': ['1M', 'ALL'],
+    'ALL': ['1Y'],
+};
+
+const getChartCacheKey = (sym, currency, range) => `${sym}:${currency}:${range}`;
+
+// ── Module-level chart cache — persists across mounts/unmounts so revisiting
+//    the same coin doesn't re-fetch chart data (TTL still applies). ──
+const globalChartCache = {};
+
+/** @internal — exposed only for test cleanup */
+export function __clearChartCacheForTesting() {
+    for (const key of Object.keys(globalChartCache)) {
+        delete globalChartCache[key];
+    }
+}
 
 const TransactionItem = React.memo(function TransactionItem({ transaction, sym, currency, coinPrice, onShowOptions, colors, fxRates, t }) {
     const isBuy = transaction.way === 'BUY' || transaction.way === 'DEPOSIT' || transaction.way === 'RECEIVE';
@@ -45,7 +67,7 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                     <Text style={[styles.txBadgeText, isBuy ? styles.textGreen : styles.textRed]}>{transaction.way}</Text>
                 </View>
                 <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr}</Text>
-                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={styles.txHeaderOptions}>
+                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={styles.txHeaderOptions} testID={`tx-options-btn-${transaction.id}`}>
                     <Feather name="more-vertical" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
             </View>
@@ -84,23 +106,37 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
 });
 
 export default function CoinScreen() {
-    const { symbol, id } = useLocalSearchParams();
+    const { symbol, id, initialCoinData, currency: paramCurrency } = useLocalSearchParams();
     const sym = String(symbol || id || '').toUpperCase();
     const { colors } = useTheme();
     const { t } = useTranslation();
 
-    const [loading, setLoading] = useState(true);
-    const [currency, setCurrency] = useState('EUR');
+    // Initialize currency from route params (passed by HomeScreen) to avoid:
+    // 1) a getMeta DB call on mount
+    // 2) a state change from 'EUR' → real currency that double-fires the chart effect
+    const [currency, setCurrency] = useState(() => paramCurrency || 'EUR');
     const [txs, setTxs] = useState([]);
-    const [coin, setCoin] = useState(null);
+
+    const [coin, setCoin] = useState(() => {
+        if (initialCoinData) {
+            try { return JSON.parse(initialCoinData); } catch (_e) { return null; }
+        }
+        return null;
+    });
+
+    const [loading, setLoading] = useState(() => !coin);
     const [range, setRange] = useState('1D');
     const [chartData, setChartData] = useState([]);
-    const [chartLoading, setChartLoading] = useState(false);
+    const [chartLoading, setChartLoading] = useState(true);
     const [chartError, setChartError] = useState('');
     const [fxRates, setFxRates] = useState({});
-    const [deferredReady, setDeferredReady] = useState(false);
+
+    const chartRequestIdRef = useRef(0);
+    const chartInFlightKeyRef = useRef('');
 
     const isMountedRef = useRef(true);
+    const hadInitialCoinRef = useRef(!!coin);
+
     useEffect(() => {
         isMountedRef.current = true;
         return () => { isMountedRef.current = false; };
@@ -124,22 +160,49 @@ export default function CoinScreen() {
 
     useEffect(() => {
         (async () => {
-            setLoading(true);
+            // Only show spinner if we don't have cached data to show immediately
+            if (!hadInitialCoinRef.current) safeSetState(setLoading, true);
             try {
-                const c = await getMeta('currency');
-                if (c) safeSetState(setCurrency, c);
-                const holdings = await getHoldingsMap();
-                const portfolio = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, c || 'EUR');
-                if (portfolio && portfolio.length > 0) safeSetState(setCoin, portfolio[0]);
-                const transactions = await listTransactionsBySymbol(sym);
-                safeSetState(setTxs, transactions || []);
-                InteractionManager.runAfterInteractions(() => safeSetState(setDeferredReady, true));
+                // When initialCoinData is present the price is already fresh (just fetched
+                // by HomeScreen seconds ago) — only load DB-local data.
+                if (hadInitialCoinRef.current) {
+                    const [storedCurrency, transactions] = await Promise.all([
+                        getMeta('currency'),
+                        listTransactionsBySymbol(sym),
+                    ]);
+                    // Only update currency if it differs from what we got via params
+                    // (edge case: param missing or stale).
+                    const nextCurrency = storedCurrency || 'EUR';
+                    if (nextCurrency !== currency) {
+                        safeSetState(setCurrency, nextCurrency);
+                    }
+                    safeSetState(setTxs, transactions || []);
+                } else {
+                    // No initial data — full fetch needed.
+                    const [storedCurrency, holdings, transactions] = await Promise.all([
+                        getMeta('currency'),
+                        getHoldingsMap(),
+                        listTransactionsBySymbol(sym),
+                    ]);
+
+                    const nextCurrency = storedCurrency || 'EUR';
+                    safeSetState(setCurrency, nextCurrency);
+                    safeSetState(setTxs, transactions || []);
+
+                    const portfolio = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, nextCurrency);
+                    if (portfolio && portfolio.length > 0) {
+                        safeSetState(setCoin, portfolio[0]);
+                    }
+                }
             } catch (e) {
                 if (globalThis.__DEV__) console.error('Initial load error:', e);
             } finally {
                 safeSetState(setLoading, false);
             }
         })();
+        // currency intentionally omitted – including it double-fires the chart
+        // effect when paramCurrency differs from the DB value on first mount.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sym, safeSetState]);
 
     useEffect(() => {
@@ -153,31 +216,88 @@ export default function CoinScreen() {
         return () => { active = false; };
     }, [txs, currency, safeSetState]);
 
+    // Keep the earliest-tx timestamp in a ref so the chart effect can read it
+    // without needing `txs` as a dependency (which caused repeated chart fetches).
+    const earliestTxMsRef = useRef(Date.now() - 365 * 24 * 60 * 60 * 1000);
     useEffect(() => {
-        let isMounted = true;
-        (async () => {
-            if (!sym) return;
-            safeSetState(setChartLoading, true);
+        if (txs.length > 0) {
+            earliestTxMsRef.current = Math.min(...txs.map((t) => new Date(t.date_iso).getTime()));
+        }
+    }, [txs]);
+
+    // Chart loading is independent from page loading so we can warm it early.
+    // Uses module-level globalChartCache so revisiting the same coin is instant.
+    useEffect(() => {
+        if (!sym) return;
+
+        let active = true;
+        const cacheKey = getChartCacheKey(sym, currency, range);
+        const cached = globalChartCache[cacheKey];
+
+        if (cached && (Date.now() - cached.timestamp < CHART_CACHE_TTL_MS)) {
+            safeSetState(setChartData, cached.data);
+            safeSetState(setChartLoading, false);
             safeSetState(setChartError, '');
+            return () => { active = false; };
+        }
+
+        if (chartInFlightKeyRef.current === cacheKey) {
+            return () => { active = false; };
+        }
+
+        const requestId = ++chartRequestIdRef.current;
+        chartInFlightKeyRef.current = cacheKey;
+        safeSetState(setChartLoading, true);
+        safeSetState(setChartError, '');
+
+        (async () => {
             try {
                 const startTime = Date.now();
-                const earliestTxMs = txs.length
-                    ? Math.min(...txs.map((t) => new Date(t.date_iso).getTime()))
-                    : Date.now() - 365 * 24 * 60 * 60 * 1000;
-                const params = getCoinChartFetchParams(range, earliestTxMs);
+                const params = getCoinChartFetchParams(range, { earliestTxMs: earliestTxMsRef.current });
                 const candles = await fetchCandles(sym, currency, params.timeframe, params.limit, params.aggregate);
-                if (globalThis.__DEV__) console.log(`[PERF] Coin Chart (${range}): ${Date.now() - startTime}ms (${candles?.length || 0} pts)`);
-                if (isMounted) {
-                    safeSetState(setChartData, candles?.length ? mapCandlesToPoints(candles) : []);
+
+                if (globalThis.__DEV__) {
+                    console.log(`[PERF] Coin Chart (${range}): ${Date.now() - startTime}ms (${candles?.length || 0} pts)`);
                 }
+
+                if (!active || requestId !== chartRequestIdRef.current) return;
+
+                const points = candles?.length ? mapCandlesToPoints(candles) : [];
+                globalChartCache[cacheKey] = { data: points, timestamp: Date.now() };
+                safeSetState(setChartData, points);
+
+                // Warm up likely next range(s) so switching feels instant.
+                const prefetchRanges = RANGE_PREFETCH_MAP[range] || [];
+                prefetchRanges.forEach(async (r) => {
+                    const prefetchKey = getChartCacheKey(sym, currency, r);
+                    const hit = globalChartCache[prefetchKey];
+                    if (hit && (Date.now() - hit.timestamp < CHART_CACHE_TTL_MS)) return;
+                    try {
+                        const p = getCoinChartFetchParams(r, { earliestTxMs: earliestTxMsRef.current });
+                        const c = await fetchCandles(sym, currency, p.timeframe, p.limit, p.aggregate);
+                        globalChartCache[prefetchKey] = {
+                            data: c?.length ? mapCandlesToPoints(c) : [],
+                            timestamp: Date.now(),
+                        };
+                    } catch (_e) {
+                        // Ignore prefetch errors; on-demand fetch still handles misses.
+                    }
+                });
             } catch (e) {
-                if (isMounted) safeSetState(setChartError, e?.message || 'Error loading chart');
+                if (!active || requestId !== chartRequestIdRef.current) return;
+                safeSetState(setChartError, e?.message || 'Error loading chart');
             } finally {
-                if (isMounted) safeSetState(setChartLoading, false);
+                if (chartInFlightKeyRef.current === cacheKey) {
+                    chartInFlightKeyRef.current = '';
+                }
+                if (active && requestId === chartRequestIdRef.current) {
+                    safeSetState(setChartLoading, false);
+                }
             }
         })();
-        return () => { isMounted = false; };
-    }, [sym, currency, range, txs, safeSetState]);
+
+        return () => { active = false; };
+    }, [sym, currency, range, safeSetState]);
 
     const txStats = useMemo(() => {
         const stats = computeCoinTransactionStats(txs, coin?.price || 0, coin?.quantity || 0, {
@@ -192,7 +312,6 @@ export default function CoinScreen() {
 
     const handleDeleteTransaction = useCallback(async (id) => {
         try {
-            const { deleteTransaction, syncHoldingsForSymbol } = await import('../db');
             await deleteTransaction(id);
             await syncHoldingsForSymbol(sym);
             await refreshData();
@@ -221,22 +340,126 @@ export default function CoinScreen() {
         );
     }, [handleDeleteTransaction, sym, t]);
 
-    const transactionList = useMemo(() => {
-        if (!txs || txs.length === 0) return null;
-        return txs.slice(0, 100).map((transaction) => (
-            <TransactionItem
-                key={transaction.id}
-                transaction={transaction}
-                sym={sym}
-                currency={currency}
-                coinPrice={coin?.price}
-                onShowOptions={showTransactionOptions}
-                colors={colors}
-                fxRates={fxRates}
-                t={t}
-            />
-        ));
-    }, [txs, sym, currency, coin?.price, showTransactionOptions, colors, fxRates, t]);
+    // ── FlatList renderItem for virtualized transaction list ──
+    const renderTransaction = useCallback(({ item: transaction }) => (
+        <TransactionItem
+            transaction={transaction}
+            sym={sym}
+            currency={currency}
+            coinPrice={coin?.price}
+            onShowOptions={showTransactionOptions}
+            colors={colors}
+            fxRates={fxRates}
+            t={t}
+        />
+    ), [sym, currency, coin?.price, showTransactionOptions, colors, fxRates, t]);
+
+    const keyExtractor = useCallback((item) => String(item.id), []);
+
+    // ── ListHeaderComponent: KPI card + chart + tx section header + add button ──
+    const listHeader = useMemo(() => (
+        <>
+            {/* ── KPI card: both stats rows wrapped in a surface card ── */}
+            <View style={styles.kpiCard}>
+                {/* Row 1: Owned / Market Value / Total Gains */}
+                <View style={styles.kpiRow}>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
+                        <Text style={[styles.statValue, { color: colors.text }]}>{formatNumber(coin?.quantity || 0, 2)}</Text>
+                    </View>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>
+                        <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value, currency)}</Text>
+                    </View>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains')}</Text>
+                        <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                            {formatMoney(txStats.totalGains, currency)}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Row 2: Avg Buy / Avg Sell / Total Return */}
+                <View style={styles.kpiRow}>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice')}</Text>
+                        <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgBuy, currency)}</Text>
+                    </View>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice')}</Text>
+                        <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgSell, currency)}</Text>
+                    </View>
+                    <View style={styles.kpiItem}>
+                        <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.totalReturnPct')}</Text>
+                        <Text style={[styles.txStatValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                            {txStats.totalGainsPct >= 0 ? '+' : ''}{txStats.totalGainsPct.toFixed(2)}%
+                        </Text>
+                    </View>
+                </View>
+            </View>
+
+            <View style={styles.chartSection}>
+                <View style={styles.chartHeader}>
+                    <View>
+                        <Text style={[styles.bigPrice, { color: colors.text }]}>{formatMoney(coin?.price, currency)}</Text>
+                        <Text style={[styles.priceChange, { color: coin?.change24h >= 0 ? colors.success : colors.error }]}>
+                            {formatMoney(coin?.price * (coin?.change24h / 100), currency)}
+                            ({coin?.change24h >= 0 ? '+' : ''}{coin?.change24h?.toFixed(2)}%)
+                        </Text>
+                    </View>
+                    <View style={styles.marketPairWrap}>
+                        <Text style={[styles.marketPair, { color: colors.text }]}>{sym}/{String(currency).toUpperCase()}</Text>
+                    </View>
+                </View>
+
+                {chartLoading && chartData.length === 0 ? (
+                    <View style={styles.chartLoadingWrap}>
+                        <ActivityIndicator color={colors.text} />
+                    </View>
+                ) : (
+                    <CryptoGraph
+                        type="candle"
+                        data={chartData}
+                        currency={currency}
+                        range={range}
+                        onRangeChange={setRange}
+                        loading={false}
+                        refreshing={chartLoading && chartData.length > 0}
+                    />
+                )}
+                {!!chartError && (
+                    <View style={styles.chartErrorWrap}>
+                        <Text style={[styles.chartErrorText, { color: colors.error }]}>{chartError}</Text>
+                        <TouchableOpacity
+                            onPress={refreshData}
+                            style={[styles.chartRetryBtn, { backgroundColor: colors.surfaceElevated }]}
+                        >
+                            <Text style={[styles.chartRetryText, { color: colors.text }]}>{t('general.retry')}</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </View>
+
+            <View style={styles.txSectionWrap}>
+                <View style={styles.txSectionHeader}>
+                    <Text style={[styles.txSectionTitle, { color: colors.text }]}>{t('coin.transactionsTab')}</Text>
+                    {txStats.count > 0 && (
+                        <Text style={[styles.txCountText, { color: colors.textSecondary }]}>#{txStats.count}</Text>
+                    )}
+                </View>
+
+                <View style={styles.addTxBtnRow}>
+                    <TouchableOpacity
+                        style={[styles.addTxBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => router.push('/add-transaction')}
+                    >
+                        <Feather name="plus" color={colors.primaryInverse} size={20} />
+                        <Text style={[styles.addTxBtnLabel, { color: colors.primaryInverse }]}>{t('coin.newTransaction')}</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </>
+    ), [coin, currency, txStats, chartData, chartLoading, chartError, range, colors, sym, refreshData, t]);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -258,107 +481,16 @@ export default function CoinScreen() {
                     <ActivityIndicator color={colors.text} />
                 </View>
             ) : (
-                <ScrollView contentContainerStyle={styles.scrollContent}>
-                    {/* ── KPI card: both stats rows wrapped in a surface card ── */}
-                    <View style={styles.kpiCard}>
-                        {/* Row 1: Owned / Market Value / Total Gains */}
-                        <View style={styles.kpiRow}>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
-                                <Text style={[styles.statValue, { color: colors.text }]}>{formatNumber(coin?.quantity || 0, 2)}</Text>
-                            </View>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>
-                                <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value, currency)}</Text>
-                            </View>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains')}</Text>
-                                <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
-                                    {formatMoney(txStats.totalGains, currency)}
-                                </Text>
-                            </View>
-                        </View>
-
-                        {/* Row 2: Avg Buy / Avg Sell / Total Return */}
-                        <View style={styles.kpiRow}>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice')}</Text>
-                                <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgBuy, currency)}</Text>
-                            </View>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice')}</Text>
-                                <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgSell, currency)}</Text>
-                            </View>
-                            <View style={styles.kpiItem}>
-                                <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.totalReturnPct')}</Text>
-                                <Text style={[styles.txStatValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
-                                    {txStats.totalGainsPct >= 0 ? '+' : ''}{txStats.totalGainsPct.toFixed(2)}%
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-
-                    <View style={styles.chartSection}>
-                        <View style={styles.chartHeader}>
-                            <View>
-                                <Text style={[styles.bigPrice, { color: colors.text }]}>{formatMoney(coin?.price, currency)}</Text>
-                                <Text style={[styles.priceChange, { color: coin?.change24h >= 0 ? colors.success : colors.error }]}>
-                                    {formatMoney(coin?.price * (coin?.change24h / 100), currency)}
-                                    ({coin?.change24h >= 0 ? '+' : ''}{coin?.change24h?.toFixed(2)}%)
-                                </Text>
-                            </View>
-                            <View style={styles.marketPairWrap}>
-                                <Text style={[styles.marketPair, { color: colors.text }]}>{sym}/{String(currency).toUpperCase()}</Text>
-                            </View>
-                        </View>
-
-                        {chartLoading ? (
-                            <View style={styles.chartLoadingWrap}>
-                                <ActivityIndicator color={colors.text} />
-                            </View>
-                        ) : (
-                            <CryptoGraph
-                                type="candle"
-                                data={chartData}
-                                currency={currency}
-                                range={range}
-                                onRangeChange={setRange}
-                            />
-                        )}
-                        {!!chartError && (
-                            <View style={styles.chartErrorWrap}>
-                                <Text style={[styles.chartErrorText, { color: colors.error }]}>{chartError}</Text>
-                                <TouchableOpacity
-                                    onPress={refreshData}
-                                    style={[styles.chartRetryBtn, { backgroundColor: colors.surfaceElevated }]}
-                                >
-                                    <Text style={[styles.chartRetryText, { color: colors.text }]}>{t('general.retry')}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </View>
-
-                    <View style={styles.txSectionWrap}>
-                        <View style={styles.txSectionHeader}>
-                            <Text style={[styles.txSectionTitle, { color: colors.text }]}>{t('coin.transactionsTab')}</Text>
-                            {txStats.count > 0 && (
-                                <Text style={[styles.txCountText, { color: colors.textSecondary }]}>#{txStats.count}</Text>
-                            )}
-                        </View>
-
-                        <View style={styles.addTxBtnRow}>
-                            <TouchableOpacity
-                                style={[styles.addTxBtn, { backgroundColor: colors.primary }]}
-                                onPress={() => router.push('/add-transaction')}
-                            >
-                                <Feather name="plus" color={colors.primaryInverse} size={20} />
-                                <Text style={[styles.addTxBtnLabel, { color: colors.primaryInverse }]}>{t('coin.newTransaction')}</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {transactionList}
-                    </View>
-                </ScrollView>
+                <FlatList
+                    data={txs}
+                    renderItem={renderTransaction}
+                    keyExtractor={keyExtractor}
+                    ListHeaderComponent={listHeader}
+                    contentContainerStyle={styles.scrollContent}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={10}
+                    windowSize={5}
+                />
             )}
         </SafeAreaView>
     );
@@ -425,7 +557,7 @@ const styles = StyleSheet.create({
     addTxBtnLabel:    { fontWeight: '700', fontSize: 14, marginLeft: 8 },
 
     // Transaction Card
-    txCard:           { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+    txCard:           { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16, marginHorizontal: 16 },
     txHeader:         { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
     txBadge:          { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 8, borderWidth: 1 },
     txBadgeText:      { fontSize: 12, fontWeight: '700' },

@@ -1,4 +1,5 @@
 import { toLinePoint } from './chartContracts';
+import { RANGE_CONFIGS } from './coinChartRange';
 
 // Named constants for magic numbers
 const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
@@ -48,47 +49,28 @@ export const computePortfolioHistory = async ({
     let rTimeframe = 'day';
     let rAggregate = 1;
     
-    switch (range) {
-        case '1H': 
-            // 1h should use minute candles; hourly candles make this view stale/inaccurate.
-            rTimeframe = 'minute'; 
-            rLimit = 60;
-            rAggregate = 1;
-            break;
-        case '1D': 
-            rTimeframe = 'hour'; 
-            rLimit = 24; 
-            rAggregate = 1;
-            break;
-        case '1W': 
-            rTimeframe = 'hour'; 
-            // 7 days * 24h = 168h.
-            rLimit = 168;
-            rAggregate = 1;
-            break;
-        case '1M': 
-            rTimeframe = 'day'; 
-            rLimit = 30; 
-            rAggregate = 1;
-            break;
-        case '1Y': 
-            rTimeframe = 'day'; 
-            rLimit = 365; 
-            rAggregate = 1;
-            break;
-        case 'ALL': {
-            // Calculate days since first transaction
-            const daysSinceFirst = Math.ceil((nowSec - earliestTxnTime) / 86400);
-            rTimeframe = 'day';
-            // Use at least 30 days, cap at 2000 (API limit)
-            rLimit = Math.min(Math.max(daysSinceFirst, 30), 2000);
-            rAggregate = Math.max(1, Math.ceil(rLimit / 200));
-            break;
-        }
-        default: 
-            rTimeframe = 'day'; 
-            rLimit = 30;
-            rAggregate = 1;
+    // Target ~100-150 points max for the fetch to keep payload light.
+    // The graph simulation simulates ~50-84 points.
+
+    const config = RANGE_CONFIGS[range] || RANGE_CONFIGS['1D'];
+    rTimeframe = config.timeframe;
+    rLimit = config.limit;
+    rAggregate = config.aggregate;
+
+    // Special case override for ALL calculation logic (dynamic based on earliestTxnTime)
+    if (range === 'ALL' && earliestTxnTime > 0) {
+        // Calculate days since first transaction
+        const daysSinceFirst = Math.ceil((nowSec - earliestTxnTime) / 86400);
+        rTimeframe = 'day';
+        const duration = Math.max(daysSinceFirst, 30);
+
+        // Target ~150 points for the full history
+        rAggregate = Math.max(1, Math.ceil(duration / 150));
+        // Ensure we fetch enough candles to cover the duration
+        rLimit = Math.ceil(duration / rAggregate);
+
+        // Cap at API limit (2000) though we shouldn't hit it with agg logic
+        rLimit = Math.min(rLimit, 2000);
     }
 
     let stepSeconds = 86400;
@@ -98,29 +80,11 @@ export const computePortfolioHistory = async ({
 
     const gridNow = Math.floor(nowSec / stepSeconds) * stepSeconds;
 
-    // For 1H view, we want hourly data points but only show the last hour
+    // Simulation uses the same step/limit as the fetch configuration
+    // (since we optimized the fetch configuration to match display density)
     let simStep = stepSeconds;
     let simLimit = rLimit;
-    
-    if (range === '1H') {
-        // Show 12 data points over the last hour (5-minute intervals).
-        simLimit = 12;
-        simStep = 300; // 5 minute intervals for display
-    }
-    if (range === '1W') {
-        // Keep chart readable while still spanning the full week.
-        simStep = 7200; // 2-hour intervals
-        simLimit = 84;  // 7 days * 12 points/day
-    }
 
-    // For ALL and 1Y, sample data points to avoid too many
-    if (range === 'ALL' || range === '1Y') {
-        const targetPoints = 50;
-        if (rLimit > targetPoints) {
-            simStep = Math.floor((rLimit * 86400) / targetPoints);
-            simLimit = targetPoints;
-        }
-    }
 
     let timePoints = [];
     for (let i = simLimit; i >= 0; i--) {
@@ -129,7 +93,7 @@ export const computePortfolioHistory = async ({
     }
     if (nowSec - timePoints[timePoints.length - 1] > 1) timePoints.push(nowSec);
 
-    // --- 2. FETCH HISTORY ---
+    // --- 2. FETCH HISTORY FOR EACH COIN ---
     const historyMap = {};
     const symbolsToFetch = Array.from(significantSymbols);
 

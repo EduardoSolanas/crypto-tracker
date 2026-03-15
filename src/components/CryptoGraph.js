@@ -1,7 +1,7 @@
+import React, { useMemo } from 'react';
 import { Dimensions, Text, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop, Line } from 'react-native-svg';
 import { useTheme } from '../utils/theme';
-import { useTranslation } from 'react-i18next';
 
 const formatYLabel = (val, currency, fractionDigits) => {
     if (val === null || val === undefined) return '';
@@ -41,7 +41,10 @@ const getAxisLabels = (min, max, currency) => {
     };
 };
 
-export default function CryptoGraph({
+// Module-level constant — not re-created on every render
+const RANGE_BUTTONS = ['1H', '1D', '1W', '1M', '1Y', 'ALL'];
+
+export default React.memo(function CryptoGraph({
     type = 'line',
     data,
     width,
@@ -51,15 +54,108 @@ export default function CryptoGraph({
     range,
     onRangeChange,
     loading = false,
+    refreshing = false,
     error = ''
 }) {
     const { colors, isDark } = useTheme();
-    const { t } = useTranslation();
+    const screenWidth = width || Dimensions.get('window').width;
+
+    // All expensive data-crunching is memoised — only re-runs when the inputs
+    // that affect the computed path / labels actually change.
+    const computed = useMemo(() => {
+        if (!data || data.length === 0) return null;
+
+        const isCandlestick = type === 'candle' || type === 'candlestick';
+        const padding = 20;
+        const chartHeight = height - padding * 2;
+        const n = data.length;
+
+        // Single-pass extraction + min/max (avoids Math.max(...arr) spread on large arrays)
+        const values = new Array(n);
+        let max = -Infinity;
+        let min = Infinity;
+
+        for (let i = 0; i < n; i++) {
+            values[i] = data[i].value || data[i].close || 0;
+            if (isCandlestick) {
+                const hi = data[i].high || data[i].value || data[i].close || 0;
+                const lo = data[i].low  || data[i].value || data[i].close || 0;
+                if (hi > max) max = hi;
+                if (lo < min) min = lo;
+            } else {
+                if (values[i] > max) max = values[i];
+                if (values[i] < min) min = values[i];
+            }
+        }
+        const rangeVal = max - min || 1;
+
+        // Interpolate zero / missing values between valid data points
+        const interpolated = [...values];
+        for (let i = 1; i < n - 1; i++) {
+            if (interpolated[i] === 0 || interpolated[i] == null) {
+                let prevIdx = i - 1;
+                while (prevIdx >= 0 && (interpolated[prevIdx] === 0 || interpolated[prevIdx] == null)) prevIdx--;
+                let nextIdx = i + 1;
+                while (nextIdx < n && (interpolated[nextIdx] === 0 || interpolated[nextIdx] == null)) nextIdx++;
+                if (prevIdx >= 0 && nextIdx < n) {
+                    interpolated[i] = interpolated[prevIdx] + ((i - prevIdx) / (nextIdx - prevIdx)) * (interpolated[nextIdx] - interpolated[prevIdx]);
+                } else if (prevIdx >= 0) {
+                    interpolated[i] = interpolated[prevIdx];
+                } else if (nextIdx < n) {
+                    interpolated[i] = interpolated[nextIdx];
+                }
+            }
+        }
+        if (n > 0 && (interpolated[0] === 0 || interpolated[0] == null)) {
+            const firstValid = interpolated.find(v => v > 0);
+            if (firstValid != null) interpolated[0] = firstValid;
+        }
+        if (n > 1 && (interpolated[n - 1] === 0 || interpolated[n - 1] == null)) {
+            for (let i = n - 2; i >= 0; i--) {
+                if (interpolated[i] > 0) { interpolated[n - 1] = interpolated[i]; break; }
+            }
+        }
+
+        // Build SVG path in a single pass using an array then join —
+        // avoids O(n) intermediate string allocations from += concatenation.
+        const xScale = n > 1 ? screenWidth / (n - 1) : 0;
+        const segments = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const x = n > 1 ? i * xScale : screenWidth / 2;
+            const y = padding + chartHeight - ((interpolated[i] - min) / rangeVal) * chartHeight;
+            segments[i] = i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+        }
+        const linePath = segments.join(' ');
+
+        const lastX = n > 1 ? (n - 1) * xScale : screenWidth / 2;
+        const fillPath = n > 0 ? `${linePath} L ${lastX} ${height} L 0 ${height} Z` : '';
+
+        const axisLabels = getAxisLabels(min, max, currency);
+
+        return { linePath, fillPath, axisLabels, isCandlestick };
+    }, [data, screenWidth, height, type, currency]); // `color` not needed — only affects SVG props below
 
     if (loading) {
         return (
-            <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
-                <ActivityIndicator color={colors.text} />
+            <View style={{ height: height + 60 }}>
+                <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator color={colors.text} />
+                </View>
+                {onRangeChange && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 16, opacity: 0.3 }}>
+                        {RANGE_BUTTONS.map(r => (
+                            <View
+                                key={r}
+                                style={[
+                                    { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+                                    range === r && { backgroundColor: colors.surfaceElevated }
+                                ]}
+                            >
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: range === r ? colors.text : colors.textSecondary }}>{r}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
             </View>
         );
     }
@@ -72,91 +168,19 @@ export default function CryptoGraph({
         );
     }
 
-    if (!data || data.length === 0) {
-        return (
-            <View style={{ width: 0, height: 0 }} testID="line-chart">
-            </View>
-        );
+    if (!computed) {
+        return <View style={{ width: 0, height: 0 }} testID="line-chart" />;
     }
 
-    const screenWidth = width || Dimensions.get('window').width;
-    const chartWidth = screenWidth; // full width — labels are overlaid
-
-    const isCandlestick = type === 'candle' || type === 'candlestick';
-
-    const values = data.map(d => d.value || d.close || 0);
-    const highs = data.map(d => d.high || d.value || d.close || 0);
-    const lows = data.map(d => d.low || d.value || d.close || 0);
-    const max = isCandlestick ? Math.max(...highs) : Math.max(...values);
-    const min = isCandlestick ? Math.min(...lows) : Math.min(...values);
-    const rangeVal = max - min || 1;
-
-    const padding = 20;
-    const chartHeight = height - padding * 2;
-
-    // Interpolate zero/missing values between valid data points to avoid gaps
-    const interpolated = [...values];
-    for (let i = 1; i < interpolated.length - 1; i++) {
-        if (interpolated[i] === 0 || interpolated[i] == null) {
-            // Find previous valid value
-            let prevIdx = i - 1;
-            while (prevIdx >= 0 && (interpolated[prevIdx] === 0 || interpolated[prevIdx] == null)) prevIdx--;
-            // Find next valid value
-            let nextIdx = i + 1;
-            while (nextIdx < interpolated.length && (interpolated[nextIdx] === 0 || interpolated[nextIdx] == null)) nextIdx++;
-            if (prevIdx >= 0 && nextIdx < interpolated.length) {
-                // Linear interpolation
-                const ratio = (i - prevIdx) / (nextIdx - prevIdx);
-                interpolated[i] = interpolated[prevIdx] + ratio * (interpolated[nextIdx] - interpolated[prevIdx]);
-            } else if (prevIdx >= 0) {
-                interpolated[i] = interpolated[prevIdx];
-            } else if (nextIdx < interpolated.length) {
-                interpolated[i] = interpolated[nextIdx];
-            }
-        }
-    }
-    // Handle edge cases: first and last points
-    if (interpolated.length > 0 && (interpolated[0] === 0 || interpolated[0] == null)) {
-        const firstValid = interpolated.find(v => v > 0);
-        if (firstValid) interpolated[0] = firstValid;
-    }
-    if (interpolated.length > 1 && (interpolated[interpolated.length - 1] === 0 || interpolated[interpolated.length - 1] == null)) {
-        for (let i = interpolated.length - 2; i >= 0; i--) {
-            if (interpolated[i] > 0) { interpolated[interpolated.length - 1] = interpolated[i]; break; }
-        }
-    }
-
-    // Build SVG path for the line
-    const points = interpolated.map((v, i) => {
-        const x = interpolated.length > 1 ? (i / (interpolated.length - 1)) * chartWidth : chartWidth / 2;
-        const y = padding + chartHeight - ((v - min) / rangeVal) * chartHeight;
-        return { x, y };
-    });
-
-    let linePath = '';
-    if (points.length > 0) {
-        linePath = `M ${points[0].x} ${points[0].y}`;
-        for (let i = 1; i < points.length; i++) {
-            linePath += ` L ${points[i].x} ${points[i].y}`;
-        }
-    }
-
-    // Build the fill path (area under the line)
-    let fillPath = '';
-    if (points.length > 0) {
-        fillPath = linePath + ` L ${points[points.length - 1].x} ${height} L ${points[0].x} ${height} Z`;
-    }
-
-    const ranges = ['1H', '1D', '1W', '1M', '1Y', 'ALL'];
-    const axisLabels = getAxisLabels(min, max, currency);
-    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+    const { linePath, fillPath, axisLabels, isCandlestick } = computed;
+    const gridColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.15)';
 
     return (
         <View style={{ height: height + 60 }}>
             {/* Chart fills full width; Y-axis labels float over the right edge */}
             <View style={{ width: screenWidth, height }} pointerEvents="none">
-                <View style={{ width: chartWidth, height }} testID={isCandlestick ? 'candlestick-chart' : 'line-chart'}>
-                    <Svg width={chartWidth} height={height}>
+                <View style={{ width: screenWidth, height }} testID={isCandlestick ? 'candlestick-chart' : 'line-chart'}>
+                    <Svg width={screenWidth} height={height}>
                         <Defs>
                             <LinearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
                                 <Stop offset="0" stopColor={color} stopOpacity="0.15" />
@@ -164,14 +188,12 @@ export default function CryptoGraph({
                             </LinearGradient>
                         </Defs>
 
-                        {/* Grid lines */}
-                        <Line x1={0} y1={padding} x2={chartWidth} y2={padding} stroke={gridColor} strokeWidth={1} />
-                        <Line x1={0} y1={height - padding} x2={chartWidth} y2={height - padding} stroke={gridColor} strokeWidth={1} />
+                        {/* Grid lines — dashed, white in dark / subtle in light */}
+                        <Line x1={0} y1={20} x2={screenWidth} y2={20} stroke={gridColor} strokeWidth={1} strokeDasharray="4 4" />
+                        <Line x1={0} y1={height - 20} x2={screenWidth} y2={height - 20} stroke={gridColor} strokeWidth={1} strokeDasharray="4 4" />
 
                         {/* Area fill */}
-                        {fillPath ? (
-                            <Path d={fillPath} fill="url(#fillGrad)" />
-                        ) : null}
+                        {fillPath ? <Path d={fillPath} fill="url(#fillGrad)" /> : null}
 
                         {/* Line */}
                         {linePath ? (
@@ -201,11 +223,26 @@ export default function CryptoGraph({
                     <Text testID="graph-y-max" style={{ color: isDark ? colors.text : colors.textSecondary, fontSize: 11 }}>{axisLabels.maxLabel}</Text>
                     <Text testID="graph-y-min" style={{ color: isDark ? colors.text : colors.textSecondary, fontSize: 11 }}>{axisLabels.minLabel}</Text>
                 </View>
+
+                {/* Refreshing overlay — small centred spinner while keeping the old chart visible */}
+                {refreshing && (
+                    <View style={{
+                        position: 'absolute',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        backgroundColor: isDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)',
+                    }}
+                        pointerEvents="none"
+                    >
+                        <ActivityIndicator size="small" color={colors.text} />
+                    </View>
+                )}
             </View>
 
             {onRangeChange && (
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 16 }}>
-                    {ranges.map(r => (
+                    {RANGE_BUTTONS.map(r => (
                         <TouchableOpacity
                             key={r}
                             onPress={() => onRangeChange(r)}
@@ -225,4 +262,4 @@ export default function CryptoGraph({
             )}
         </View>
     );
-}
+});

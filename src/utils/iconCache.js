@@ -63,6 +63,18 @@ export function getIconFallbackUris(symbol, imageUrlPath = null) {
 }
 
 /**
+ * Synchronous initial icon URI — returns a memory-cached local path or
+ * the remote URL derived from imageUrl.  Never touches the filesystem.
+ * Used by CoinIcon to avoid the letter-fallback flash on first render.
+ */
+export function getInitialIconUri(symbol, imageUrlPath = null) {
+    const upperSymbol = String(symbol || '').toUpperCase();
+    if (memoryCache[upperSymbol]) return memoryCache[upperSymbol];
+    if (imageUrlPath) return getRemoteUrl(symbol, imageUrlPath);
+    return null;
+}
+
+/**
  * Get a cached icon URI, downloading if necessary
  * @param {string} symbol - Coin symbol (e.g., 'BTC')
  * @param {string} imageUrlPath - Optional path from CryptoCompare API (e.g., '/media/44352193/btc.png')

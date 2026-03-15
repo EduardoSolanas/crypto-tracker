@@ -60,6 +60,7 @@
     "assets": "Assets",
     "hideSmallBalances": "Hide Small Balances",
     "showSmallBalances": "Show {{count}} Small Balances",
+    "priceUnavailable": "No price data",
     "addTransaction": "Add Transaction",
     "offlineModeTitle": "Offline Mode",
     "offlineModeMessage": "Using cached data (API Limit / Network).",

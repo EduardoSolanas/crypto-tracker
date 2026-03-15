@@ -26,6 +26,7 @@ import { useTheme } from '../utils/theme';
 // Cache expiration times
 const CACHE_MAJOR = 10 * 60 * 1000;  // 10 minutes for assets > $10
 const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
+const RANGE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes per-range history cache
 const debugLog = (...args) => {
     if (globalThis.__DEV__) {
         console.log(...args);
@@ -54,10 +55,20 @@ export default function HomeScreen() {
     const [chartData, setChartData] = useState([]);
     const [range, setRange] = useState('1D'); // Default range
     const [graphLoading, setGraphLoading] = useState(false);
+    const [graphRefreshing, setGraphRefreshing] = useState(false);
     const [graphError, setGraphError] = useState('');
     const [chartColor, setChartColor] = useState('#22c55e');
     const [delta, setDelta] = useState({ val: 0, pct: 0 });
     const didBootstrapRef = useRef(false);
+    // Cache the last-fetched transaction list so range changes don't need a DB
+    // round-trip — only invalidated when portfolio data actually changes.
+    const allTxnsRef = useRef(null);
+    // Bootstrap already computes history; skip the effect's first run so we don't
+    // compute it a second time immediately after setPortfolio fires.
+    const skipNextHistoryRef = useRef(false);
+    // Per-range result cache — avoids re-fetching when the user switches back to a
+    // recently-viewed range. TTL: 5 minutes (RANGE_CACHE_TTL).
+    const rangeCacheRef = useRef({});
 
     const totalValue = useMemo(
         () => (portfolio ? portfolio.reduce((acc, c) => acc + c.value, 0) : 0),
@@ -155,7 +166,28 @@ export default function HomeScreen() {
     // Compute History with dynamic range support
     const computeHistory = useCallback(async (allTxns, currentPortfolio, selectedCurrency, selectedRange) => {
         try {
-            setGraphLoading(true);
+            // ── Instant cache hit ───────────────────────────────────────────
+            const cached = rangeCacheRef.current[selectedRange];
+            const now = Date.now();
+            if (cached && (now - cached.timestamp) < RANGE_CACHE_TTL) {
+                // Data is fresh — paint immediately, no spinner needed
+                setChartData(cached.chartData);
+                setDelta(cached.delta);
+                setChartColor(cached.chartColor);
+                setCoinDeltas(cached.coinDeltas);
+                return;
+            }
+
+            // ── Stale cache: paint old data instantly, refresh in background ─
+            if (cached) {
+                setChartData(cached.chartData);
+                setDelta(cached.delta);
+                setChartColor(cached.chartColor);
+                setCoinDeltas(cached.coinDeltas);
+                setGraphRefreshing(true);   // overlay spinner, chart stays visible
+            } else {
+                setGraphLoading(true);      // full spinner, no data yet
+            }
             setGraphError('');
 
             const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
@@ -165,6 +197,9 @@ export default function HomeScreen() {
                 range: selectedRange,
                 fetchCandles
             });
+
+            // Write to cache
+            rangeCacheRef.current[selectedRange] = { chartData, delta, chartColor, coinDeltas, timestamp: Date.now() };
 
             setChartData(chartData);
             setDelta(delta);
@@ -180,12 +215,28 @@ export default function HomeScreen() {
             setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
         } finally {
             setGraphLoading(false);
+            setGraphRefreshing(false);
         }
     }, [tr]);
     // Recompute graph whenever range/currency/portfolio changes.
     useEffect(() => {
         if (!portfolio) return;
+
+        // Bootstrap already computed history for the first portfolio value — skip once.
+        if (skipNextHistoryRef.current) {
+            skipNextHistoryRef.current = false;
+            return;
+        }
+
+        // Re-use the cached transaction list when only the range changed (no DB call).
+        // Invalidate the cache (allTxnsRef.current = null) after import / refresh.
+        if (allTxnsRef.current !== null) {
+            computeHistory(allTxnsRef.current, portfolio, currency, range);
+            return;
+        }
+
         getAllTransactions().then((txs) => {
+            allTxnsRef.current = txs;
             computeHistory(txs, portfolio, currency, range);
         });
     }, [computeHistory, currency, portfolio, range]);
@@ -212,8 +263,12 @@ export default function HomeScreen() {
                 if (cached?.chartData && cached?.range === range) {
                     safeSetState(setChartData, cached.chartData);
                     safeSetState(setDelta, cached.delta);
+                    // History came from cache — still skip the effect's first run
+                    skipNextHistoryRef.current = true;
                 } else {
                     await refreshData(range);
+                    // refreshData already computed history — skip the effect's first run
+                    skipNextHistoryRef.current = true;
                 }
             } catch (e) {
                 debugLog('Bootstrap error:', e);
@@ -265,6 +320,10 @@ export default function HomeScreen() {
 
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
+            // Invalidate cache so the next effect run fetches fresh transactions,
+            // then skip that run because we're calling computeHistory directly here.
+            allTxnsRef.current = allTxns;
+            skipNextHistoryRef.current = true;
             setPortfolio(sortPortfolioByValueDesc(p));
             computeHistory(allTxns, p, currency, range);
 
@@ -281,10 +340,13 @@ export default function HomeScreen() {
 
     const refreshPrices = async () => {
         setLoading(true);
+        rangeCacheRef.current = {}; // invalidate all cached ranges
         try {
             const holdings = await getEffectiveHoldings();
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
+            allTxnsRef.current = allTxns;
+            skipNextHistoryRef.current = true;
             setPortfolio(sortPortfolioByValueDesc(p));
             computeHistory(allTxns, p, currency, range);
         } catch (e) {
@@ -306,16 +368,20 @@ export default function HomeScreen() {
         safeSetState(setGraphLoading, true);
         setGraphError('');
         try {
-            const holdingsMap = await getEffectiveHoldings();
             const txs = await getAllTransactions();
+            allTxnsRef.current = txs;
             const currentCurrency = await getMeta('currency') || currency;
 
             const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
-                holdingsMap,
-                txs,
+                allTxns: txs,
+                currentPortfolio: portfolio,
                 currency: currentCurrency,
-                range: selectedRange
+                range: selectedRange,
+                fetchCandles,
             });
+
+            // Populate the per-range cache so switching back to this range is instant
+            rangeCacheRef.current[selectedRange] = { chartData, delta, chartColor, coinDeltas, timestamp: Date.now() };
 
             safeSetState(setChartData, chartData);
             safeSetState(setDelta, delta);
@@ -330,19 +396,33 @@ export default function HomeScreen() {
         } finally {
             safeSetState(setGraphLoading, false);
         }
-    }, [range, currency, portfolio, tr, getEffectiveHoldings, safeSetState]);
+    }, [range, currency, portfolio, tr, safeSetState]);
 
     const filteredPortfolio = useMemo(() => {
         if (!portfolio) return null;
         return portfolio.filter(c => c.value >= 10);
     }, [portfolio]);
 
+    // Separate coins with value < 10 into two groups:
+    // 1) Genuine small balances — the API returned a real price, but qty × price < 10
+    // 2) Unpriced coins — the API had no data, so price === 0
     const smallBalances = useMemo(() => {
         if (!portfolio) return [];
-        return portfolio.filter(c => c.value < 10);
+        return portfolio.filter(c => c.value < 10 && c.price > 0);
     }, [portfolio]);
 
-    const displayedPortfolio = showSmallBalances ? portfolio : filteredPortfolio;
+    const unpricedCoins = useMemo(() => {
+        if (!portfolio) return [];
+        return portfolio.filter(c => c.price === 0 || c.price == null);
+    }, [portfolio]);
+
+    const displayedPortfolio = useMemo(() => {
+        if (!portfolio) return null;
+        // Always show coins with value >= 10 (the main list).
+        // When toggle is on, also include genuine small balances AND unpriced coins.
+        if (showSmallBalances) return portfolio;
+        return filteredPortfolio;
+    }, [portfolio, filteredPortfolio, showSmallBalances]);
 
     if (booting) {
         return (
@@ -383,7 +463,8 @@ export default function HomeScreen() {
                     data={chartData}
                     range={range}
                     onRangeChange={setRange}
-                    loading={graphLoading}
+                    loading={graphLoading && chartData.length === 0}
+                    refreshing={graphRefreshing || (graphLoading && chartData.length > 0)}
                     error={graphError}
                     color={chartColor}
                     currency={currency}
@@ -400,7 +481,13 @@ export default function HomeScreen() {
                             style={[styles.assetRow, { backgroundColor: colors.surface }]}
                             onPress={() => router.push({
                                 pathname: `/coin/${item.symbol}`,
-                                params: { symbol: item.symbol, id: item.id }
+                                params: {
+                                    symbol: item.symbol,
+                                    id: item.id,
+                                    // Pass initial data to render immediately without waiting for fetch
+                                    initialCoinData: JSON.stringify(item),
+                                    currency,
+                                }
                             })}
                         >
                             <View style={styles.assetLeft}>
@@ -413,10 +500,12 @@ export default function HomeScreen() {
                                 </View>
                             </View>
                             <View style={styles.assetRight}>
-                                <Text style={[styles.assetValue, { color: colors.text }]}>{formatMoney(item.value, currency)}</Text>
+                                <Text style={[styles.assetValue, { color: colors.text }]}>
+                                    {item.price > 0 ? formatMoney(item.value, currency) : '—'}
+                                </Text>
                                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
                                     <Text style={[styles.assetPrice, { color: colors.textSecondary, marginRight: 8 }]}>
-                                        {formatMoney(item.price, currency)}
+                                        {item.price > 0 ? formatMoney(item.price, currency) : tr('home.priceUnavailable', 'No price data')}
                                     </Text>
                                     {coinDeltas[item.symbol] && (
                                         <Text style={{
@@ -441,15 +530,15 @@ export default function HomeScreen() {
                     </View>
                 )}
 
-                {smallBalances.length > 0 && (
+                {(smallBalances.length > 0 || unpricedCoins.length > 0) && (
                     <TouchableOpacity
-                        style={[styles.smallBalancesToggle, { borderTopColor: colors.borderLight }]}
+                        style={styles.smallBalancesToggle}
                         onPress={() => setShowSmallBalances(!showSmallBalances)}
                     >
                         <Text style={[styles.smallBalancesText, { color: colors.primary }]}>
                             {showSmallBalances
                                 ? tr('home.hideSmallBalances', 'Hide Small Balances')
-                                : tr('home.showSmallBalances', `Show ${smallBalances.length} Small Balances`, { count: smallBalances.length })}
+                                : tr('home.showSmallBalances', `Show ${smallBalances.length + unpricedCoins.length} Small Balances`, { count: smallBalances.length + unpricedCoins.length })}
                         </Text>
                         <Feather name={showSmallBalances ? "chevron-up" : "chevron-down"} size={16} color={colors.primary} />
                     </TouchableOpacity>
@@ -522,7 +611,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingVertical: 16,
         marginTop: 8,
-        borderTopWidth: 1,
         marginHorizontal: 16,
     },
     smallBalancesText: {

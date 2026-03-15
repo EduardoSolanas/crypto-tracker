@@ -96,6 +96,34 @@ export async function getAllTransactions() {
     return [...mem.transactions].sort((a, b) => (a.date_iso < b.date_iso ? -1 : 1));
 }
 
+/* ---------------- CACHE ---------------- */
+
+export async function saveCache(p, cData, d, r) {
+    mem.meta.set('cached_portfolio', JSON.stringify(p));
+    mem.meta.set('cached_chart_data', JSON.stringify(cData));
+    mem.meta.set('cached_delta', JSON.stringify(d));
+    mem.meta.set('cached_range', r);
+    mem.meta.set('cached_custom_ts', String(Date.now()));
+}
+
+export async function loadCache() {
+    const pStr = mem.meta.get('cached_portfolio');
+    const cStr = mem.meta.get('cached_chart_data');
+    const dStr = mem.meta.get('cached_delta');
+    const rStr = mem.meta.get('cached_range');
+    const tsStr = mem.meta.get('cached_custom_ts');
+    if (pStr && cStr) {
+        return {
+            portfolio: JSON.parse(pStr),
+            chartData: JSON.parse(cStr),
+            delta: dStr ? JSON.parse(dStr) : { val: 0, pct: 0 },
+            range: rStr || '1D',
+            timestamp: tsStr ? Number(tsStr) : 0,
+        };
+    }
+    return null;
+}
+
 /* ---------------- HOLDINGS ---------------- */
 
 export async function upsertHoldings(holdingsMap) {
