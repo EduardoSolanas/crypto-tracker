@@ -83,8 +83,22 @@ jest.mock('../../components/CoinIcon', () => {
 
 jest.mock('../../components/CryptoGraph', () => {
     const React = require('react');
-    return function MockCryptoGraph() {
-        return React.createElement('View', { testID: 'mock-crypto-graph' });
+    return function MockCryptoGraph(props) {
+        const dataLen = Array.isArray(props?.data) ? props.data.length : 0;
+        return React.createElement(
+            'View',
+            { testID: 'mock-crypto-graph' },
+            React.createElement('Text', { testID: 'mock-graph-range' }, String(props?.range || '')),
+            React.createElement('Text', { testID: 'mock-graph-data-len' }, String(dataLen)),
+            React.createElement('TouchableOpacity', {
+                testID: 'mock-range-1H',
+                onPress: () => props?.onRangeChange?.('1H'),
+            }),
+            React.createElement('TouchableOpacity', {
+                testID: 'mock-range-1D',
+                onPress: () => props?.onRangeChange?.('1D'),
+            })
+        );
     };
 });
 
@@ -196,12 +210,58 @@ describe('HomeScreen', () => {
 
     it('computes graph with default range 1D on load', async () => {
         const history = require('../../utils/portfolioHistory');
-        render(<HomeScreen />);
+        history.computePortfolioHistory.mockResolvedValueOnce({
+            chartData: [{ timestamp: 1, value: 10 }, { timestamp: 2, value: 12 }],
+            delta: { val: 2, pct: 20 },
+            chartColor: '#22c55e',
+            coinDeltas: {},
+        });
+
+        const { getByTestId } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(
                 expect.objectContaining({ range: '1D' })
             );
+        });
+
+        await waitFor(() => {
+            expect(getByTestId('mock-graph-range').props.children).toBe('1D');
+            expect(getByTestId('mock-graph-data-len').props.children).toBe('2');
+        });
+    });
+
+    it('recomputes graph when switching from 1D to 1H', async () => {
+        const history = require('../../utils/portfolioHistory');
+        history.computePortfolioHistory
+            .mockResolvedValueOnce({
+                chartData: [{ timestamp: 1, value: 10 }],
+                delta: { val: 0, pct: 0 },
+                chartColor: '#22c55e',
+                coinDeltas: {},
+            })
+            .mockResolvedValueOnce({
+                chartData: [{ timestamp: 1, value: 9 }, { timestamp: 2, value: 11 }],
+                delta: { val: 2, pct: 22.22 },
+                chartColor: '#22c55e',
+                coinDeltas: {},
+            });
+
+        const { getByTestId } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
+                expect.objectContaining({ range: '1D' })
+            );
+        });
+
+        fireEvent.press(getByTestId('mock-range-1H'));
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
+                expect.objectContaining({ range: '1H' })
+            );
+            expect(getByTestId('mock-graph-range').props.children).toBe('1H');
         });
     });
 });

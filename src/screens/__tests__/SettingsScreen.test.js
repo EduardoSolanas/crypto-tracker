@@ -36,6 +36,24 @@ jest.mock('../../../src/db', () => ({
     getHoldingsMap: jest.fn().mockResolvedValue({}),
 }));
 
+// Avoid booting full i18next init pipeline for this simple render test.
+jest.mock('../../../src/i18n', () => ({
+    __esModule: true,
+    default: {
+        resolvedLanguage: 'en',
+        changeLanguage: jest.fn().mockResolvedValue(true),
+    },
+    getSystemLanguage: jest.fn(() => 'en'),
+}));
+
+// Keep currency modal data tiny; the full list is unnecessary for this assertion.
+jest.mock('../../../src/utils/currencies', () => ({
+    getCurrencyOptions: jest.fn(() => [
+        { code: 'EUR', name: 'Euro' },
+        { code: 'USD', name: 'US Dollar' },
+    ]),
+}));
+
 describe('SettingsScreen', () => {
     beforeEach(() => {
         jest.clearAllMocks();

@@ -4,14 +4,34 @@ const debugLog = (...args) => {
     }
 };
 
-// Get image URL path from API response
-const getImageUrlPath = (d) => d?.IMAGEURL || null;
 const asNumber = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
 };
 
 const hasPrice = (d) => asNumber(d?.PRICE) > 0;
+
+const COINGECKO_SYMBOL_OVERRIDES = {
+    BTC: 'bitcoin',
+    ETH: 'ethereum',
+    XRP: 'ripple',
+    ADA: 'cardano',
+    DOGE: 'dogecoin',
+    FLR: 'flare-networks',
+    SGB: 'songbird',
+    PLU: 'pluton',
+    LUNA: 'terra-luna-2',
+};
+
+let coinGeckoCoinListPromise = null;
+
+/** @internal - test helper */
+export function __resetCryptoProviderCachesForTesting() {
+    coinGeckoCoinListPromise = null;
+}
+
+// Get image URL path from CryptoCompare API response
+const getImageUrlPath = (d) => d?.IMAGEURL || null;
 
 async function fetchCcPriceMultiFull(symbols, currency) {
     const fsyms = (symbols || []).map((s) => String(s || '').toUpperCase()).filter(Boolean);
@@ -27,6 +47,189 @@ async function fetchCcPriceMultiFull(symbols, currency) {
     }
 
     return json?.RAW || {};
+}
+
+async function fetchCoinGeckoCoinList() {
+    if (!coinGeckoCoinListPromise) {
+        const url = 'https://api.coingecko.com/api/v3/coins/list?include_platform=false';
+        coinGeckoCoinListPromise = fetch(url)
+            .then((res) => res.json())
+            .then((rows) => (Array.isArray(rows) ? rows : []))
+            .catch(() => []);
+    }
+    return coinGeckoCoinListPromise;
+}
+
+async function resolveCoinGeckoIds(symbols) {
+    const unique = [...new Set((symbols || []).map((s) => String(s || '').toUpperCase()).filter(Boolean))];
+    const symbolToId = {};
+    if (!unique.length) return symbolToId;
+
+    // 1) deterministic manual overrides for known ambiguous/high-priority symbols
+    unique.forEach((sym) => {
+        const mapped = COINGECKO_SYMBOL_OVERRIDES[sym];
+        if (mapped) symbolToId[sym] = mapped;
+    });
+
+    const unresolved = unique.filter((sym) => !symbolToId[sym]);
+    if (!unresolved.length) return symbolToId;
+
+    // 2) fallback to /coins/list resolution by symbol
+    const coinList = await fetchCoinGeckoCoinList();
+    const bySymbol = new Map();
+    for (const coin of coinList) {
+        const sym = String(coin?.symbol || '').toUpperCase();
+        if (!sym || bySymbol.has(sym)) continue;
+        bySymbol.set(sym, coin.id);
+    }
+
+    unresolved.forEach((sym) => {
+        const id = bySymbol.get(sym);
+        if (id) symbolToId[sym] = id;
+    });
+
+    return symbolToId;
+}
+
+function sampleCandles(candles, limit) {
+    const target = Math.max(1, Number(limit || 0));
+    const rows = Array.isArray(candles) ? candles : [];
+    if (rows.length <= target) return rows;
+
+    const sampled = [];
+    const step = rows.length / target;
+    for (let i = 0; i < target; i++) {
+        const idx = Math.min(rows.length - 1, Math.floor(i * step));
+        sampled.push(rows[idx]);
+    }
+    return sampled;
+}
+
+function mapDurationToCoinGeckoDays(timeframe, limit, aggregate) {
+    let unitSeconds = 86400;
+    if (timeframe === 'hour') unitSeconds = 3600;
+    if (timeframe === 'minute') unitSeconds = 60;
+
+    const durationDays = (Math.max(1, Number(limit || 1)) * Math.max(1, Number(aggregate || 1)) * unitSeconds) / 86400;
+    if (durationDays <= 1) return '1';
+    if (durationDays <= 7) return '7';
+    if (durationDays <= 14) return '14';
+    if (durationDays <= 30) return '30';
+    if (durationDays <= 90) return '90';
+    if (durationDays <= 180) return '180';
+    if (durationDays <= 365) return '365';
+    return 'max';
+}
+
+async function fetchCoinGeckoPrices(holdingsMap, currency) {
+    const symbols = Object.keys(holdingsMap || {}).map((s) => String(s).toUpperCase());
+    if (!symbols.length) return [];
+
+    const targetCurrency = String(currency || '').toUpperCase();
+    const targetCurrencyLower = targetCurrency.toLowerCase();
+    const symbolToId = await resolveCoinGeckoIds(symbols);
+
+    const symbolsWithId = symbols.filter((sym) => !!symbolToId[sym]);
+    if (!symbolsWithId.length) return symbols.map((sym) => ({
+        symbol: sym,
+        quantity: holdingsMap[sym] ?? 0,
+        price: 0,
+        value: 0,
+        change24h: 0,
+        high24h: 0,
+        low24h: 0,
+        mktCap: 0,
+        vol24h: 0,
+        imageUrl: null,
+    }));
+
+    const ids = symbolsWithId.map((sym) => symbolToId[sym]);
+    const vsCurrencies = targetCurrency === 'USD' ? 'usd' : `${targetCurrencyLower},usd`;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=${vsCurrencies}&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    let usdToTargetRate = targetCurrency === 'USD' ? 1 : 0;
+
+    if (targetCurrency !== 'USD') {
+        const needsUsdCross = symbols.some((sym) => {
+            const id = symbolToId[sym];
+            const d = id ? json?.[id] : null;
+            const direct = asNumber(d?.[targetCurrencyLower]);
+            const usd = asNumber(d?.usd);
+            return direct <= 0 && usd > 0;
+        });
+        if (needsUsdCross) {
+            usdToTargetRate = await fetchUsdToTargetRate(targetCurrency);
+        }
+    }
+
+    const idToSymbols = new Map();
+    for (const sym of symbolsWithId) {
+        const id = symbolToId[sym];
+        const bucket = idToSymbols.get(id) || [];
+        bucket.push(sym);
+        idToSymbols.set(id, bucket);
+    }
+
+    const portfolio = symbols.map((sym) => {
+        const quantity = holdingsMap[sym] ?? 0;
+        const id = symbolToId[sym];
+        const d = id ? json?.[id] : null;
+
+        let price = asNumber(d?.[targetCurrencyLower]);
+        let mktCap = asNumber(d?.[`${targetCurrencyLower}_market_cap`]);
+        let vol24h = asNumber(d?.[`${targetCurrencyLower}_24h_vol`]);
+
+        if (price <= 0 && usdToTargetRate > 0) {
+            const usdPrice = asNumber(d?.usd);
+            if (usdPrice > 0) {
+                price = usdPrice * usdToTargetRate;
+                mktCap = asNumber(d?.usd_market_cap) * usdToTargetRate;
+                vol24h = asNumber(d?.usd_24h_vol) * usdToTargetRate;
+            }
+        }
+
+        return {
+            symbol: sym,
+            quantity,
+            price,
+            value: quantity * price,
+            change24h: asNumber(d?.[`${targetCurrencyLower}_24h_change`] ?? d?.usd_24h_change),
+            high24h: 0,
+            low24h: 0,
+            mktCap,
+            vol24h,
+            imageUrl: null,
+        };
+    });
+
+    return portfolio;
+}
+
+async function fetchCoinGeckoCandles(symbol, currency, timeframe, limit, aggregate) {
+    const sym = String(symbol || '').toUpperCase();
+    const idMap = await resolveCoinGeckoIds([sym]);
+    const id = idMap[sym];
+    if (!id) throw new Error(`CoinGecko id not found for ${sym}`);
+
+    const days = mapDurationToCoinGeckoDays(timeframe, limit, aggregate);
+    const vsCurrency = String(currency || '').toLowerCase();
+    const url = `https://api.coingecko.com/api/v3/coins/${id}/ohlc?vs_currency=${vsCurrency}&days=${days}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`CoinGecko OHLC failed (${res.status})`);
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return [];
+
+    const candles = rows.map((r) => ({
+        time: Math.floor(asNumber(r?.[0]) / 1000),
+        open: asNumber(r?.[1]),
+        high: asNumber(r?.[2]),
+        low: asNumber(r?.[3]),
+        close: asNumber(r?.[4]),
+    }));
+
+    return sampleCandles(candles, limit);
 }
 
 async function fetchUsdToTargetRate(targetCurrency) {
@@ -71,6 +274,62 @@ function mapCcQuoteToPortfolioRow(sym, d, quantity) {
         vol24h: asNumber(d?.VOLUME24HOURTO),
         imageUrl: getImageUrlPath(d)
     };
+}
+
+async function fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency) {
+    const symbols = Object.keys(holdingsMap || {});
+    if (symbols.length === 0) return [];
+    const targetCurrency = String(currency || '').toUpperCase();
+
+    // 1) Try direct pair(s) first.
+    const directRaw = await fetchCcPriceMultiFull(symbols, targetCurrency);
+    const missingSymbols = symbols.filter((sym) => !hasPrice(directRaw?.[sym]?.[targetCurrency]));
+
+    let usdRaw = {};
+    let usdToTargetRate = 0;
+
+    // 2) For missing direct quotes, try cross-rate via USD.
+    if (missingSymbols.length > 0) {
+        usdRaw = await fetchCcPriceMultiFull(missingSymbols, 'USD');
+        usdToTargetRate = await fetchUsdToTargetRate(targetCurrency);
+    }
+
+    return symbols.map((sym) => {
+        const quantity = holdingsMap[sym] ?? 0;
+        const directQuote = directRaw?.[sym]?.[targetCurrency];
+        if (hasPrice(directQuote)) {
+            return mapCcQuoteToPortfolioRow(sym, directQuote, quantity);
+        }
+
+        const usdQuote = usdRaw?.[sym]?.USD;
+        if (hasPrice(usdQuote) && usdToTargetRate > 0) {
+            return {
+                symbol: sym,
+                quantity,
+                price: asNumber(usdQuote.PRICE) * usdToTargetRate,
+                value: quantity * asNumber(usdQuote.PRICE) * usdToTargetRate,
+                change24h: asNumber(usdQuote.CHANGEPCT24HOUR),
+                high24h: asNumber(usdQuote.HIGH24HOUR) * usdToTargetRate,
+                low24h: asNumber(usdQuote.LOW24HOUR) * usdToTargetRate,
+                mktCap: asNumber(usdQuote.MKTCAP) * usdToTargetRate,
+                vol24h: asNumber(usdQuote.VOLUME24HOURTO) * usdToTargetRate,
+                imageUrl: getImageUrlPath(usdQuote)
+            };
+        }
+
+        return {
+            symbol: sym,
+            quantity,
+            price: 0,
+            value: 0,
+            change24h: 0,
+            high24h: 0,
+            low24h: 0,
+            mktCap: 0,
+            vol24h: 0,
+            imageUrl: null
+        };
+    });
 }
 
 // --- FALLBACK: BINANCE ---
@@ -132,69 +391,64 @@ async function fetchBinancePrices(holdingsMap, currency) {
     return portfolio;
 }
 
-// --- PRIMARY: CRYPTOCOMPARE ---
+// --- PRIMARY: COINGECKO ---
 export async function fetchPortfolioPrices(holdingsMap, currency) {
     const symbols = Object.keys(holdingsMap || {});
     if (symbols.length === 0) return [];
-    const targetCurrency = String(currency || '').toUpperCase();
 
     try {
-        // 1) Try direct pair(s) first.
-        const directRaw = await fetchCcPriceMultiFull(symbols, targetCurrency);
-        const missingSymbols = symbols.filter((sym) => !hasPrice(directRaw?.[sym]?.[targetCurrency]));
+        let primary = await fetchCoinGeckoPrices(holdingsMap, currency);
+        let bySymbol = Object.fromEntries(primary.map((r) => [r.symbol, r]));
 
-        let usdRaw = {};
-        let usdToTargetRate = 0;
+        let unresolved = symbols.filter((sym) => asNumber(bySymbol?.[sym]?.price) <= 0);
 
-        // 2) For missing direct quotes, try cross-rate via USD.
-        if (missingSymbols.length > 0) {
-            usdRaw = await fetchCcPriceMultiFull(missingSymbols, 'USD');
-            usdToTargetRate = await fetchUsdToTargetRate(targetCurrency);
+        // Per-symbol fallback to CryptoCompare for unresolved quotes.
+        if (unresolved.length > 0) {
+            const partialHoldings = {};
+            unresolved.forEach((sym) => { partialHoldings[sym] = holdingsMap[sym]; });
+            const ccRows = await fetchPortfolioPricesFromCryptoCompare(partialHoldings, currency);
+            ccRows.forEach((row) => {
+                if (asNumber(row?.price) > 0) bySymbol[row.symbol] = row;
+            });
         }
 
-        const portfolio = symbols.map((sym) => {
-            const quantity = holdingsMap[sym] ?? 0;
-            const directQuote = directRaw?.[sym]?.[targetCurrency];
-            if (hasPrice(directQuote)) {
-                return mapCcQuoteToPortfolioRow(sym, directQuote, quantity);
-            }
+        unresolved = symbols.filter((sym) => asNumber(bySymbol?.[sym]?.price) <= 0);
 
-            const usdQuote = usdRaw?.[sym]?.USD;
-            if (hasPrice(usdQuote) && usdToTargetRate > 0) {
-                return {
-                    symbol: sym,
-                    quantity,
-                    price: asNumber(usdQuote.PRICE) * usdToTargetRate,
-                    value: quantity * asNumber(usdQuote.PRICE) * usdToTargetRate,
-                    change24h: asNumber(usdQuote.CHANGEPCT24HOUR),
-                    high24h: asNumber(usdQuote.HIGH24HOUR) * usdToTargetRate,
-                    low24h: asNumber(usdQuote.LOW24HOUR) * usdToTargetRate,
-                    mktCap: asNumber(usdQuote.MKTCAP) * usdToTargetRate,
-                    vol24h: asNumber(usdQuote.VOLUME24HOURTO) * usdToTargetRate,
-                    imageUrl: getImageUrlPath(usdQuote)
-                };
-            }
+        // Final per-symbol fallback to Binance for unresolved quotes.
+        if (unresolved.length > 0) {
+            const partialHoldings = {};
+            unresolved.forEach((sym) => { partialHoldings[sym] = holdingsMap[sym]; });
+            const bnRows = await fetchBinancePrices(partialHoldings, currency);
+            bnRows.forEach((row) => {
+                if (asNumber(row?.price) > 0) bySymbol[row.symbol] = row;
+            });
+        }
 
-            return {
-                symbol: sym,
-                quantity,
-                price: 0,
-                value: 0,
-                change24h: 0,
-                high24h: 0,
-                low24h: 0,
-                mktCap: 0,
-                vol24h: 0,
-                imageUrl: null
-            };
+        const portfolio = symbols.map((sym) => bySymbol[sym] || {
+            symbol: sym,
+            quantity: holdingsMap[sym] ?? 0,
+            price: 0,
+            value: 0,
+            change24h: 0,
+            high24h: 0,
+            low24h: 0,
+            mktCap: 0,
+            vol24h: 0,
+            imageUrl: null,
         });
 
         portfolio.sort((a, b) => b.value - a.value);
         return portfolio;
 
     } catch (e) {
-        console.warn('[CryptoCompare] Primary pricing failed:', e?.message || e);
-        // Fallback to Binance
+        console.warn('[CoinGecko] Primary pricing failed:', e?.message || e);
+        try {
+            const ccRows = await fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency);
+            const hasAnyPrice = ccRows.some((r) => asNumber(r?.price) > 0);
+            if (hasAnyPrice) return ccRows.sort((a, b) => b.value - a.value);
+        } catch (ccErr) {
+            console.warn('[CryptoCompare] Pricing fallback failed:', ccErr?.message || ccErr);
+        }
         return await fetchBinancePrices(holdingsMap, currency);
     }
 }
@@ -272,6 +526,15 @@ export async function fetchHistory(symbol, currency, limit = 30) {
 }
 
 export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 30, aggregate = 1) {
+    try {
+        const cgCandles = await fetchCoinGeckoCandles(symbol, currency, timeframe, limit, aggregate);
+        if (cgCandles.length > 0) {
+            return cgCandles;
+        }
+    } catch (_e) {
+        // Continue to CryptoCompare fallback
+    }
+
     try {
         let endpoint = 'histoday';
         if (timeframe === 'hour') endpoint = 'histohour';
