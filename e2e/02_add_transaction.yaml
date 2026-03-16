@@ -1,0 +1,54 @@
+appId: com.belcebuu.CryptoPortfolio
+name: "Add a BTC buy transaction → verify it appears in portfolio"
+tags:
+  - transaction
+  - add
+
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: "home-add-tx-fab"
+
+# ── Open Add Transaction screen via the FAB ──────────────────────────────
+- tapOn:
+    id: "home-add-tx-fab"
+
+- assertVisible:
+    id: "add-tx-save-button"
+
+# ── Fill in the form ─────────────────────────────────────────────────────
+# Make sure BUY is selected (default)
+- tapOn:
+    id: "add-tx-type-buy"
+
+- tapOn:
+    id: "add-tx-symbol-input"
+- clearText
+- inputText: "BTC"
+
+- tapOn:
+    id: "add-tx-amount-input"
+- clearText
+- inputText: "0.5"
+
+- tapOn:
+    id: "add-tx-price-input"
+- clearText
+- inputText: "50000"
+
+# Use today's date (pre-filled by the screen) — leave date as-is
+
+# ── Save ─────────────────────────────────────────────────────────────────
+- tapOn:
+    id: "add-tx-save-button"
+
+# ── Back on home screen: BTC should now appear in the portfolio ──────────
+- assertVisible:
+    id: "home-add-tx-fab"
+
+# The holding value should be present (0.5 × current price)
+- assertVisible:
+    id: "asset-row-BTC"
+

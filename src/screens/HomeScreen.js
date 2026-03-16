@@ -441,7 +441,13 @@ export default function HomeScreen() {
             >
                 <View style={styles.header}>
                     <View>
-                        <Text style={[styles.title, { color: colors.textSecondary }]}>{tr('home.portfolio', 'Portfolio')}</Text>
+                        <Text
+                            style={[styles.title, { color: colors.textSecondary }]}
+                            testID="home-portfolio-title"
+                            accessibilityLabel="home-portfolio-title"
+                        >
+                            {tr('home.portfolio', 'Portfolio')}
+                        </Text>
                         <Text style={[styles.totalValue, { color: colors.text }]}>{formatMoney(totalValue, currency)}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                             <Text style={[styles.delta, { color: chartColor }]}>
@@ -471,15 +477,23 @@ export default function HomeScreen() {
                 />
 
                 <View style={styles.assetsHeader}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>{tr('home.assets', 'Assets')}</Text>
+                    <Text
+                        style={[styles.sectionTitle, { color: colors.text }]}
+                        testID="home-assets-title"
+                        accessibilityLabel="home-assets-title"
+                    >
+                        {tr('home.assets', 'Assets')}
+                    </Text>
                 </View>
 
                 {displayedPortfolio?.length > 0 ? (
                     displayedPortfolio.map((item) => (
-                        <TouchableOpacity
-                            key={item.symbol}
-                            style={[styles.assetRow, { backgroundColor: colors.surface }]}
-                            onPress={() => router.push({
+                <TouchableOpacity
+                    key={item.symbol}
+                    style={[styles.assetRow, { backgroundColor: colors.surface }]}
+                    testID={`asset-row-${item.symbol}`}
+                    accessibilityLabel={`asset-row-${item.symbol}`}
+                    onPress={() => router.push({
                                 pathname: `/coin/${item.symbol}`,
                                 params: {
                                     symbol: item.symbol,
@@ -523,7 +537,13 @@ export default function HomeScreen() {
                     ))
                 ) : (
                     <View style={styles.emptyContainer}>
-                        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{tr('home.noData', 'No data. Import CSV.')}</Text>
+                        <Text
+                            style={[styles.emptyText, { color: colors.textSecondary }]}
+                            testID="home-empty-text"
+                            accessibilityLabel="home-empty-text"
+                        >
+                            {tr('home.noData', 'No data. Import CSV.')}
+                        </Text>
                         <TouchableOpacity style={[styles.importBtn, { backgroundColor: colors.primary }]} onPress={pickAndImportCsv}>
                             <Text style={styles.importBtnText}>{tr('home.importCsv', 'Import CSV')}</Text>
                         </TouchableOpacity>
@@ -548,6 +568,8 @@ export default function HomeScreen() {
             <TouchableOpacity
                 style={[styles.fab, { backgroundColor: colors.primary }]}
                 onPress={() => router.push('/add-transaction')}
+                testID="home-add-tx-fab"
+                accessibilityLabel="home-add-tx-fab"
             >
                 <Feather name="plus" size={24} color="#fff" />
             </TouchableOpacity>

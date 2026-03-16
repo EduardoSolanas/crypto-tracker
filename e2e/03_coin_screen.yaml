@@ -1,0 +1,32 @@
+appId: com.belcebuu.CryptoPortfolio
+name: "Navigate to BTC coin screen — verify KPIs and transaction list"
+tags:
+  - navigation
+  - coin-screen
+
+---
+# Set up: add BTC so we have something to tap on
+- runFlow: "02_add_transaction.yaml"
+
+# ── Tap BTC row to open coin screen ──────────────────────────────────────
+- tapOn:
+    id: "asset-row-BTC"
+
+# ── Coin screen KPI section ───────────────────────────────────────────────
+# The options button on the transaction card must be present
+- assertVisible:
+    id: "tx-options-btn"
+
+# Chart range buttons
+- assertVisible:
+    id: "graph-range-1D"
+- assertVisible:
+    id: "graph-range-1W"
+- assertVisible:
+    id: "graph-range-1M"
+
+# ── Navigate back ─────────────────────────────────────────────────────────
+- pressKey: Back
+- assertVisible:
+    id: "home-add-tx-fab"
+

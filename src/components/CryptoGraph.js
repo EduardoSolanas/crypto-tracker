@@ -246,6 +246,8 @@ export default React.memo(function CryptoGraph({
                         <TouchableOpacity
                             key={r}
                             onPress={() => onRangeChange(r)}
+                            testID={`graph-range-${r}`}
+                            accessibilityLabel={`graph-range-${r}`}
                             style={[
                                 { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
                                 range === r && { backgroundColor: colors.surfaceElevated }

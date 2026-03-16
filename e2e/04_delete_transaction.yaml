@@ -1,0 +1,41 @@
+appId: com.belcebuu.CryptoPortfolio
+name: "Delete a transaction from the coin screen"
+tags:
+  - transaction
+  - delete
+
+---
+# Set up: add BTC transaction
+- runFlow: "02_add_transaction.yaml"
+
+# ── Navigate to BTC coin screen ───────────────────────────────────────────
+- tapOn:
+    id: "asset-row-BTC"
+
+- assertVisible: "Transactions"
+- assertVisible: "BUY"
+
+# ── Open transaction options ──────────────────────────────────────────────
+- tapOn:
+    id: "tx-options-btn"
+
+# Options alert: Edit / Delete / Cancel
+- assertVisible: "Transaction Options"
+- assertVisible: "Delete"
+
+# ── Choose Delete ─────────────────────────────────────────────────────────
+- tapOn: "Delete"
+
+# Confirmation alert
+- assertVisible: "Confirm Delete"
+
+# ── Confirm deletion ──────────────────────────────────────────────────────
+- tapOn: "Delete"
+
+# Transaction is gone — the BUY badge should no longer be visible
+- assertNotVisible: "BUY"
+
+# Holdings should now be 0, so BTC may disappear from coin screen stats
+# or show "0" — just make sure the screen didn't crash
+- assertVisible: "BTC"
+

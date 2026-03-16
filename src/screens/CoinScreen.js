@@ -67,7 +67,7 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                     <Text style={[styles.txBadgeText, isBuy ? styles.textGreen : styles.textRed]}>{transaction.way}</Text>
                 </View>
                 <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr}</Text>
-                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={styles.txHeaderOptions} testID={`tx-options-btn-${transaction.id}`}>
+                <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={styles.txHeaderOptions} testID={`tx-options-btn-${transaction.id}`} accessibilityLabel="tx-options-btn">
                     <Feather name="more-vertical" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
             </View>
@@ -442,7 +442,13 @@ export default function CoinScreen() {
 
             <View style={styles.txSectionWrap}>
                 <View style={styles.txSectionHeader}>
-                    <Text style={[styles.txSectionTitle, { color: colors.text }]}>{t('coin.transactionsTab')}</Text>
+                    <Text
+                        style={[styles.txSectionTitle, { color: colors.text }]}
+                        testID="coin-transactions-title"
+                        accessibilityLabel="coin-transactions-title"
+                    >
+                        {t('coin.transactionsTab')}
+                    </Text>
                     {txStats.count > 0 && (
                         <Text style={[styles.txCountText, { color: colors.textSecondary }]}>#{txStats.count}</Text>
                     )}
@@ -462,7 +468,11 @@ export default function CoinScreen() {
     ), [coin, currency, txStats, chartData, chartLoading, chartError, range, colors, sym, refreshData, t]);
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <SafeAreaView
+            style={[styles.container, { backgroundColor: colors.background }]}
+            testID="coin-screen-root"
+            accessibilityLabel="coin-screen-root"
+        >
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
                     <Feather name="arrow-left" size={24} color={colors.text} />

@@ -23,9 +23,7 @@ module.exports = {
         '^.+\\.(js|jsx|ts|tsx)$': 'babel-jest',
     },
     setupFilesAfterEnv: [
-        '@testing-library/react-native/extend-expect'
-    ],
-    setupFiles: [
+        '@testing-library/react-native/extend-expect',
         './jest.setup.js'
     ]
 };

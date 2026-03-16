@@ -1,0 +1,14 @@
+appId: com.belcebuu.CryptoPortfolio
+name: "Home screen loads and shows empty portfolio"
+tags:
+  - smoke
+
+---
+# Fresh install — no existing data
+- launchApp:
+    clearState: true
+
+# Locale-agnostic selectors (testID/accessibilityLabel)
+- assertVisible:
+    id: "home-add-tx-fab"
+

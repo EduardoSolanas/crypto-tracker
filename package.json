@@ -12,7 +12,10 @@
     "lint": "expo lint",
     "ci:guard": "node ./scripts/check-react-renderer-version.mjs",
     "test": "jest",
-    "test:ci": "npm run ci:guard && jest"
+    "test:ci": "npm run ci:guard && jest",
+    "e2e:preflight": "node ./scripts/e2e-preflight.mjs",
+    "e2e": "npm run e2e:preflight && node ./scripts/run-maestro.mjs test e2e/",
+    "e2e:single": "npm run e2e:preflight && node ./scripts/run-maestro.mjs test"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

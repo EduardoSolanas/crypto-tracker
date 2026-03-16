@@ -134,7 +134,13 @@ export default function AddTransactionScreen() {
                 >
                     <Feather name="arrow-left" color={colors.text} size={24} />
                 </TouchableOpacity>
-                <Text style={[styles.title, { color: colors.text }]}>{t('addTransaction.title')}</Text>
+                <Text
+                    style={[styles.title, { color: colors.text }]}
+                    testID="add-tx-title"
+                    accessibilityLabel="add-tx-title"
+                >
+                    {t('addTransaction.title')}
+                </Text>
                 <View style={{ width: 40 }} />
             </View>
 

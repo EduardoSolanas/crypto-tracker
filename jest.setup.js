@@ -3,7 +3,7 @@
 // The Dimensions mock is applied after Jest has fully initialized
 
 // Configure RNTL to use predefined host component names to avoid Flow syntax parsing issues
-import { configure } from '@testing-library/react-native';
+import { act, cleanup, configure } from '@testing-library/react-native';
 configure({
     // This tells RNTL what the host component names are, avoiding auto-detection
     // which can fail due to Flow type syntax in RN internals
@@ -221,3 +221,25 @@ console.warn = (...args) => {
     }
     originalConsoleWarn(...args);
 };
+
+const originalConsoleError = console.error;
+console.error = (...args) => {
+    const first = args?.[0];
+    if (
+        typeof first === 'string' &&
+        first.includes('An update to VirtualizedList inside a test was not wrapped in act(...)')
+    ) {
+        // Known React Native virtualized-lists warning noise in test env.
+        return;
+    }
+    originalConsoleError(...args);
+};
+
+afterEach(async () => {
+    cleanup();
+    // Flush pending microtasks that can fire immediately after unmount.
+    await act(async () => {
+        await Promise.resolve();
+    });
+});
+

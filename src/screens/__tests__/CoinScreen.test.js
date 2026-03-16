@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import CoinScreen, { __clearChartCacheForTesting } from '../CoinScreen';
 
 const mockUseLocalSearchParams = jest.fn();
@@ -89,6 +89,14 @@ jest.mock('react-native-wagmi-charts', () => {
 });
 
 describe('CoinScreen graph ranges', () => {
+    const mountedScreens = [];
+
+    const renderScreen = () => {
+        const screen = render(<CoinScreen />);
+        mountedScreens.push(screen);
+        return screen;
+    };
+
     beforeEach(() => {
         jest.clearAllMocks();
         __clearChartCacheForTesting();
@@ -110,10 +118,19 @@ describe('CoinScreen graph ranges', () => {
         ]);
     });
 
+    afterEach(async () => {
+        while (mountedScreens.length > 0) {
+            mountedScreens.pop().unmount();
+        }
+        await act(async () => {
+            await Promise.resolve();
+        });
+    });
+
     it('uses ALL mode params for per-coin graph', async () => {
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
 
-        const { getByText } = render(<CoinScreen />);
+        const { getByText } = renderScreen();
 
         await waitFor(() => {
             expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
@@ -131,7 +148,7 @@ describe('CoinScreen graph ranges', () => {
     it('accepts legacy id param as symbol fallback', async () => {
         mockUseLocalSearchParams.mockReturnValue({ id: 'ETH' });
 
-        render(<CoinScreen />);
+        renderScreen();
 
         await waitFor(() => {
             expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'hour', 24, 1);
@@ -141,7 +158,7 @@ describe('CoinScreen graph ranges', () => {
     it('recomputes graph when switching ranges', async () => {
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
 
-        const { getByText } = render(<CoinScreen />);
+        const { getByText } = renderScreen();
 
         await waitFor(() => {
             expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
@@ -160,7 +177,7 @@ describe('CoinScreen graph ranges', () => {
     it('recomputes graph when switching to ALL range', async () => {
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
 
-        const { getByText } = render(<CoinScreen />);
+        const { getByText } = renderScreen();
 
         await waitFor(() => {
             expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
@@ -188,7 +205,7 @@ describe('CoinScreen graph ranges', () => {
 
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'LTC', initialCoinData });
 
-        render(<CoinScreen />);
+        renderScreen();
 
         // Should render immediately without waiting for fetch (loading is false)
         // Check for value formatted as EUR (default)
@@ -200,7 +217,8 @@ describe('CoinScreen graph ranges', () => {
             expect(mockFetchCandles).toHaveBeenCalledWith('LTC', 'EUR', 'hour', 24, 1);
         });
 
-        // Add a small delay to allow potential state updates to settle, avoiding teardown issues
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await act(async () => {
+            await Promise.resolve();
+        });
     });
 });

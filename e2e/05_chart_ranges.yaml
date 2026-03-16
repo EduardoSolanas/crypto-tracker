@@ -1,0 +1,53 @@
+appId: com.belcebuu.CryptoPortfolio
+name: "Switch chart ranges on the coin screen"
+tags:
+  - chart
+  - coin-screen
+
+---
+# Set up: add BTC so the coin screen has a real price to graph
+- runFlow: "02_add_transaction.yaml"
+
+- tapOn:
+    id: "asset-row-BTC"
+
+# Default range is 1D — assert chart range buttons are visible
+- assertVisible:
+    id: "graph-range-1H"
+- assertVisible:
+    id: "graph-range-1D"
+- assertVisible:
+    id: "graph-range-1W"
+- assertVisible:
+    id: "graph-range-1M"
+- assertVisible:
+    id: "graph-range-1Y"
+- assertVisible:
+    id: "graph-range-ALL"
+
+# Switch to 1H
+- tapOn:
+    id: "graph-range-1H"
+# Give the chart a moment to reload
+- wait: 1500
+- assertVisible:
+    id: "graph-range-1H"
+
+# Switch to 1W
+- tapOn:
+    id: "graph-range-1W"
+- wait: 1500
+- assertVisible:
+    id: "graph-range-1W"
+
+# Switch back to 1D
+- tapOn:
+    id: "graph-range-1D"
+- wait: 1500
+- assertVisible:
+    id: "graph-range-1D"
+
+- pressKey: Back
+- assertVisible:
+    id: "home-add-tx-fab"
+

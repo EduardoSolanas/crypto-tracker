@@ -1,3 +1,5 @@
+/* global afterAll */
+
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
@@ -79,7 +81,15 @@ jest.mock('../../components/CoinIcon', () => {
     };
 });
 
+jest.mock('../../components/CryptoGraph', () => {
+    const React = require('react');
+    return function MockCryptoGraph() {
+        return React.createElement('View', { testID: 'mock-crypto-graph' });
+    };
+});
+
 describe('HomeScreen', () => {
+    const originalDev = globalThis.__DEV__;
     const mockPortfolio = [
         { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
         { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
@@ -90,6 +100,7 @@ describe('HomeScreen', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        globalThis.__DEV__ = false;
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
 
@@ -104,6 +115,10 @@ describe('HomeScreen', () => {
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(mockPortfolio);
     });
 
+    afterAll(() => {
+        globalThis.__DEV__ = originalDev;
+    });
+
     it('hides assets below $10 by default and shows toggle count', async () => {
         const { getByText, queryByText } = render(<HomeScreen />);
 
@@ -112,7 +127,7 @@ describe('HomeScreen', () => {
             expect(getByText('ETH')).toBeTruthy();
             expect(getByText('XRP')).toBeTruthy();
             expect(getByText(/Show 2/i)).toBeTruthy();
-        });
+        }, { timeout: 3000 });
 
         expect(queryByText('DOGE')).toBeNull();
         expect(queryByText('ADA')).toBeNull();
