@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Attach to Packager",
+            "cwd": "${workspaceFolder}",
+            "type": "reactnativedirect",
+            "request": "attach",
+            "url": "http://localhost:8081"
+        },
+        {
+            "name": "Debug Android",
+            "cwd": "${workspaceFolder}",
+            "type": "reactnative",
+            "request": "launch",
+            "platform": "android"
+        }
+    ]
+}

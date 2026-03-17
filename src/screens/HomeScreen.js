@@ -126,8 +126,14 @@ export default function HomeScreen() {
                     // New symbol not in cache
                     toFetch.push(sym);
                 } else {
-                    const val = cachedItem.value;
+                    const val = Number(cachedItem.value || 0);  // Ensure number
                     const age = now - savedTimestamp;
+
+                    // If price is 0 but we have quantity, force refresh (don't cache failure for long)
+                    if (val === 0 && Number(holdingsMap[sym]) > 0) {
+                        toFetch.push(sym);
+                        continue;
+                    }
 
                     // Logic: If val > 10, expire in 10 mins. If val <= 10, expire in 1h.
                     const threshold = val > 10 ? CACHE_MAJOR : CACHE_MINOR;

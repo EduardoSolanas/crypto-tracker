@@ -1,6 +1,6 @@
-import * as Localization from 'expo-localization';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import * as Localization from 'expo-localization';
 
 import de from './locales/de/common.json';
 import en from './locales/en/common.json';
@@ -19,13 +19,16 @@ const resources = {
 const supportedLanguages = Object.keys(resources);
 
 function resolveDeviceLanguage() {
-    const tag = Localization.getLocales?.()?.[0]?.languageTag || 'en';
-    const base = String(tag).split('-')[0].toLowerCase();
-    return supportedLanguages.includes(base) ? base : 'en';
+    try {
+        const tag = Localization.getLocales?.()?.[0]?.languageTag || 'en';
+        const base = String(tag).split('-')[0].toLowerCase();
+        return supportedLanguages.includes(base) ? base : 'en';
+    } catch (e) {
+        return 'en';
+    }
 }
 
 if (!i18n.isInitialized) {
-    // eslint-disable-next-line import/no-named-as-default-member
     i18n
         .use(initReactI18next)
         .init({

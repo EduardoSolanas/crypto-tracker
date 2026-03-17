@@ -1,8 +1,4 @@
-const debugLog = (...args) => {
-    if (globalThis.__DEV__) {
-        console.log(...args);
-    }
-};
+import { cryptoService } from './services/crypto/CryptoService.js';
 
 const asNumber = (v) => {
     const n = Number(v);
@@ -334,44 +330,82 @@ async function fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency) {
 
 // --- FALLBACK: BINANCE ---
 async function fetchBinancePrices(holdingsMap, currency) {
-    debugLog('[API] Using Binance Fallback');
     const symbols = Object.keys(holdingsMap);
     const portfolio = [];
+
+    // Attempt to resolve exchange rate to target currency (fallback to 0 if fails)
+    let usdToTargetRate = 1;
+    const target = String(currency || 'USD').toUpperCase();
+    if (target !== 'USD' && target !== 'USDT') {
+        usdToTargetRate = await fetchUsdToTargetRate(target);
+    }
 
     // Binance doesn't have a multi-symbol endpoint like CC, so we fetch in parallel
     // (Rate limit for Binance is very high, 1200/min usually safe)
     await Promise.all(symbols.map(async (sym) => {
         try {
-            // MAPPING: USDT is a common base if EUR fails, but let's try CURRENCY first.
-            // Binance symbols are usually Uppercase e.g. BTCEUR
-            let pair = `${sym}${currency}`.toUpperCase();
+            const symUpper = String(sym).toUpperCase();
 
-            // Special handling for common infinite stablecoins or small caps if needed
-            // For now assume standard pairs
+            const fetchPair = async (p) => {
+                const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${p}`);
+                if (!res.ok) return null;
+                return res.json();
+            };
 
-            const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`);
-            if (!res.ok) {
-                // Try USDT intermediate if EUR fails? 
-                // For now just skip or return 0
-                // console.warn(`[Binance] No pair for ${pair}`);
-                // return;
-                throw new Error(`No pair ${pair}`);
+            let json = null;
+            let finalRate = 1;
+
+            // 1. Try Direct pair if applicable (and not USD/USDT which we cover below)
+            if (target !== 'USD' && target !== 'USDT') {
+                 json = await fetchPair(`${symUpper}${target}`);
             }
 
-            const json = await res.json();
+            // 2. Try USDT
+            if (!json) {
+                json = await fetchPair(`${symUpper}USDT`);
+                if (json) {
+                    if (target !== 'USD' && target !== 'USDT') {
+                        finalRate = usdToTargetRate;
+                    }
+                }
+            }
+
+            // 3. Try BUSD
+            if (!json) {
+                json = await fetchPair(`${symUpper}BUSD`);
+                 if (json) {
+                    if (target !== 'USD' && target !== 'BUSD') {
+                        finalRate = usdToTargetRate;
+                    }
+                }
+            }
+
+            if (!json) {
+                 throw new Error(`No pair for ${sym} (checked ${target}, USDT, BUSD)`);
+            }
+
+            // If we relied on USD rate but it failed
+            if (finalRate === 0) {
+                 console.warn(`[Binance] Missing FX rate for ${target}, cannot convert ${sym}`);
+                 // We have a price in USD but can't convert. Treating as 0 price effectively.
+                 finalRate = 0;
+            }
+
             const quantity = holdingsMap[sym] ?? 0;
-            const price = parseFloat(json.lastPrice);
+            const price = parseFloat(json.lastPrice) * finalRate;
+            const quoteVol = parseFloat(json.quoteVolume); // Volume in Quote Asset (e.g. USDT)
+            const vol24h = quoteVol * finalRate;
 
             portfolio.push({
                 symbol: sym,
                 quantity,
                 price,
                 value: quantity * price,
-                change24h: parseFloat(json.priceChangePercent),
-                high24h: parseFloat(json.highPrice),
-                low24h: parseFloat(json.lowPrice),
+                change24h: parseFloat(json.priceChangePercent), // % change is same regardless of currency
+                high24h: parseFloat(json.highPrice) * finalRate,
+                low24h: parseFloat(json.lowPrice) * finalRate,
                 mktCap: 0, // Binance ticker doesn't return mkt cap
-                vol24h: parseFloat(json.volume), // This is base volume
+                vol24h,
                 imageUrl: null // Will use fallback in CoinIcon component
             });
 
@@ -392,6 +426,11 @@ async function fetchBinancePrices(holdingsMap, currency) {
 }
 
 // --- PRIMARY: COINGECKO ---
+export async function fetchPortfolioPrices(holdingsMap, currency) {
+    return cryptoService.getPortfolio(holdingsMap, currency);
+}
+
+/*
 export async function fetchPortfolioPrices(holdingsMap, currency) {
     const symbols = Object.keys(holdingsMap || {});
     if (symbols.length === 0) return [];
@@ -452,6 +491,7 @@ export async function fetchPortfolioPrices(holdingsMap, currency) {
         return await fetchBinancePrices(holdingsMap, currency);
     }
 }
+*/
 
 export async function fetchFxRates(fromCurrencies, toCurrency) {
     const uniqueFrom = [...new Set((fromCurrencies || []).map((c) => String(c || '').toUpperCase()).filter(Boolean))];
