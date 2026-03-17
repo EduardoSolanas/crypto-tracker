@@ -23,12 +23,13 @@ function resolveDeviceLanguage() {
         const tag = Localization.getLocales?.()?.[0]?.languageTag || 'en';
         const base = String(tag).split('-')[0].toLowerCase();
         return supportedLanguages.includes(base) ? base : 'en';
-    } catch (e) {
+    } catch (_e) {
         return 'en';
     }
 }
 
 if (!i18n.isInitialized) {
+    /* eslint-disable-next-line import/no-named-as-default-member */
     i18n
         .use(initReactI18next)
         .init({

@@ -8,14 +8,16 @@ export const formatMoney = (val, cur = 'EUR') => {
     const v = Number(val || 0);
 
     try {
-        return new Intl.NumberFormat(undefined, {
+        const formatted = new Intl.NumberFormat(undefined, {
             style: 'currency',
             currency: cur || 'EUR',
-            minimumFractionDigits: 0,
+            minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         }).format(v);
+        return v % 1 === 0 ? formatted.replace(/\.00(?=\s|$|[^0-9])/, '') : formatted;
     } catch (_e) {
-        const rounded = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.00$/, '');
+        const isInt = v % 1 === 0;
+        const rounded = v.toFixed(isInt ? 0 : 2);
         const [intPart, fracPart] = rounded.split('.');
         const withGroups = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         return `${cur} ${fracPart ? `${withGroups}.${fracPart}` : withGroups}`;

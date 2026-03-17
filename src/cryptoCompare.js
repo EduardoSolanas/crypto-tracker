@@ -117,6 +117,7 @@ function mapDurationToCoinGeckoDays(timeframe, limit, aggregate) {
     return 'max';
 }
 
+/* eslint-disable-next-line no-unused-vars */
 async function fetchCoinGeckoPrices(holdingsMap, currency) {
     const symbols = Object.keys(holdingsMap || {}).map((s) => String(s).toUpperCase());
     if (!symbols.length) return [];
@@ -272,6 +273,7 @@ function mapCcQuoteToPortfolioRow(sym, d, quantity) {
     };
 }
 
+/* eslint-disable-next-line no-unused-vars */
 async function fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency) {
     const symbols = Object.keys(holdingsMap || {});
     if (symbols.length === 0) return [];
@@ -329,6 +331,7 @@ async function fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency) {
 }
 
 // --- FALLBACK: BINANCE ---
+/* eslint-disable-next-line no-unused-vars */
 async function fetchBinancePrices(holdingsMap, currency) {
     const symbols = Object.keys(holdingsMap);
     const portfolio = [];
