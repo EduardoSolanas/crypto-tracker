@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
+import appJson from '../app.json';
 import { fetchPortfolioPrices } from '../src/cryptoCompare';
 import { exportTransactionsToCSV, parseDeltaCsvWithReport } from '../src/csv';
 import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, setMeta } from '../src/db';
@@ -275,6 +276,9 @@ export default function SettingsScreen() {
                     <Feather name="arrow-left" color={colors.text} size={24} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{tr('settings.title', 'Settings')}</Text>
+                <Text style={[styles.versionText, { color: colors.textSecondary }]}>
+                    v{appJson.expo.version}
+                </Text>
             </View>
 
             <View style={styles.section}>
@@ -432,11 +436,12 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, padding: 16 },
-    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, paddingVertical: 12 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, paddingVertical: 12 },
     backBtn: { padding: 8, marginRight: 8 },
-    title: { fontSize: 24, fontWeight: 'bold' },
+    title: { fontSize: 24, fontWeight: 'bold', flex: 1 },
+    versionText: { fontSize: 12, fontWeight: '500' },
 
-    section: { marginBottom: 24 },
+    // ...existing code...
     sectionTitle: { fontSize: 14, marginBottom: 12, fontWeight: '600' },
     card: { borderRadius: 12 },
 

@@ -67,4 +67,13 @@ describe('SettingsScreen', () => {
             expect(getByText('Reset All Data')).toBeTruthy();
         });
     });
+
+    it('displays the build version at the top right', async () => {
+        const { getByText } = render(<SettingsScreen />);
+
+        await waitFor(() => {
+            const versionText = getByText('v1.1.1');
+            expect(versionText).toBeTruthy();
+        });
+    });
 });
