@@ -222,14 +222,16 @@ console.warn = (...args) => {
     originalConsoleWarn(...args);
 };
 
+const ACT_WARNING_PATTERNS = [
+    'An update to VirtualizedList inside a test was not wrapped in act(...)',
+    'Warning: An update to',
+    'not wrapped in act(...)',
+];
+
 const originalConsoleError = console.error;
 console.error = (...args) => {
     const first = args?.[0];
-    if (
-        typeof first === 'string' &&
-        first.includes('An update to VirtualizedList inside a test was not wrapped in act(...)')
-    ) {
-        // Known React Native virtualized-lists warning noise in test env.
+    if (typeof first === 'string' && ACT_WARNING_PATTERNS.some(p => first.includes(p))) {
         return;
     }
     originalConsoleError(...args);
@@ -237,9 +239,12 @@ console.error = (...args) => {
 
 afterEach(async () => {
     cleanup();
-    // Flush pending microtasks that can fire immediately after unmount.
+    // Flush multiple microtask queue turns to drain chained async state updates
+    // (e.g. initDb → getMeta → fetchPrices → computeHistory → saveCache chains).
     await act(async () => {
-        await Promise.resolve();
+        for (let i = 0; i < 5; i++) {
+            await Promise.resolve();
+        }
     });
 });
 

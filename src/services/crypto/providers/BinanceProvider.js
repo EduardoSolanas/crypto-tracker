@@ -1,3 +1,5 @@
+import { logger } from '../../../utils/logger.js';
+
 export class BinanceProvider {
     async fetchPrices(symbols) {
         if (!symbols || !symbols.length) return {};
@@ -39,7 +41,7 @@ export class BinanceProvider {
                     }
                 }
             } catch (e) {
-                console.warn(`[BinanceProvider] Error fetching ${sym}:`, e.message);
+                logger.warn(`[BinanceProvider] Error fetching ${sym}:`, e.message);
             }
         }));
 

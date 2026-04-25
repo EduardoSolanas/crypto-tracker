@@ -1,3 +1,5 @@
+import { logger } from '../../../utils/logger.js';
+
 const asNumber = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
@@ -19,7 +21,7 @@ export class CryptoCompareProvider {
         const json = await res.json();
 
         if (json?.Response === 'Error') {
-            console.error(json.Message || 'API Error'); // Log but don't throw if partial success?
+            logger.warn('[CryptoCompareProvider]', json.Message || 'API Error');
             return {};
         }
 

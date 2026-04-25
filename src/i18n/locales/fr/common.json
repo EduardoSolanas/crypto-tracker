@@ -88,7 +88,8 @@
     "pricePerCoinLabel": "Price per Coin ({{currency}})",
     "dateLabel": "Date (YYYY-MM-DD)",
     "saveTransaction": "Save Transaction",
-    "manualEntry": "Manual entry"
+    "manualEntry": "Manual entry",
+    "editTitle": "Modifier la Transaction"
   },
   "coin": {
     "status": "{{symbol}} Status",

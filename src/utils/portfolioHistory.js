@@ -1,5 +1,6 @@
 import { toLinePoint } from './chartContracts';
 import { RANGE_CONFIGS } from './coinChartRange';
+import { logger } from './logger.js';
 
 // Named constants for magic numbers
 const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
@@ -106,9 +107,7 @@ export const computePortfolioHistory = async ({
                     historyMap[sym] = data || [];
                 } catch (err) {
                     historyMap[sym] = [];
-                    if (globalThis.__DEV__) {
-                        console.error(`Error fetching history for ${sym}:`, err);
-                    }
+                    logger.error(`Error fetching history for ${sym}:`, err);
                 }
             })
         );
@@ -183,7 +182,9 @@ export const computePortfolioHistory = async ({
     const getAssetPerformance = (item, history, r, rangeStart) => {
         const { price, quantity, change24h } = item;
         if (r === '1D') {
-            const startPrice = price / (1 + (change24h / 100));
+            const factor = 1 + (change24h / 100);
+            // Guard: factor ≤ 0 means change24h ≤ -100%, which would give Infinity or negative start price.
+            const startPrice = factor > 0 ? price / factor : 0;
             return { val: (price - startPrice) * quantity, pct: change24h };
         }
         if (!history || history.length === 0) return { val: 0, pct: 0 };

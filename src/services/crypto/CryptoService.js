@@ -1,4 +1,5 @@
 import { CryptoProviderService } from './CryptoProviderService.js';
+import { logger } from '../../utils/logger.js';
 
 const asNumber = (v) => {
     const n = Number(v);
@@ -22,12 +23,11 @@ class CryptoService {
             const rate = asNumber(json?.[target]);
             if (rate > 0) return rate;
         } catch (e) {
-            console.warn('[CryptoService] FX rate fetch failed:', e);
+            logger.warn('[CryptoService] FX rate fetch failed:', e);
         }
 
-        // Fallback or returned 0?
-        // Maybe try another source if needed, but for now simple fallback.
-        return 0;
+        // Fall back to 1 (show USD prices) rather than returning 0 and wiping all values.
+        return 1;
     }
 
     async getPortfolio(holdingsMap, currency) {
@@ -47,7 +47,7 @@ class CryptoService {
             usdPrices = await this.providerService.fetchPrices(fetchSymbols);
             // console.log('[CryptoService] Got USD prices:', Object.keys(usdPrices));
         } catch (e) {
-            console.error('[CryptoService] Provider fetch error:', e);
+            logger.error('[CryptoService] Provider fetch error:', e);
         }
 
         // 2. Get FX Rate if needed
@@ -64,7 +64,7 @@ class CryptoService {
             const item = usdPrices[upSym];
 
             if (!item) {
-                console.warn(`[CryptoService] No price found for ${sym} (checked ${upSym})`);
+                logger.warn(`[CryptoService] No price found for ${sym} (checked ${upSym})`);
                 // Return empty/zero row
                 return {
                     symbol: sym,

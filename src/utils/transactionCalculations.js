@@ -22,7 +22,7 @@ function normalizeQuoteAmount(quoteAmount, quoteCurrency, targetCurrency, fxRate
 
     const rate = Number(fxRates?.[from]);
     if (!Number.isFinite(rate) || rate <= 0) {
-        return 0;
+        return amount;
     }
     return amount * rate;
 }
@@ -37,6 +37,9 @@ export function computeCoinTransactionStats(
     const txs = sortTransactionsAsc(transactions);
     let buyTotalCost = 0;
     let buyTotalQty = 0;
+    // Only units where we recorded a cost — used so free coins (airdrops/deposits with
+    // no quote_amount) don't drag down the displayed average buy price.
+    let buyPricedQty = 0;
     let sellTotalValue = 0;
     let sellTotalQty = 0;
     let realizedGains = 0;
@@ -59,7 +62,10 @@ export function computeCoinTransactionStats(
 
         if (BUY_WAYS.has(way)) {
             buyTotalQty += amount;
-            buyTotalCost += quoteAmount > 0 ? quoteAmount : 0;
+            if (quoteAmount > 0) {
+                buyTotalCost += quoteAmount;
+                buyPricedQty += amount;
+            }
 
             runningQty += amount;
             runningCostBasis += quoteAmount > 0 ? quoteAmount : 0;
@@ -92,9 +98,10 @@ export function computeCoinTransactionStats(
     const totalGains = realizedGains + marketValue - runningCostBasis;
 
     return {
-        avgBuy: buyTotalQty > EPSILON ? buyTotalCost / buyTotalQty : 0,
+        avgBuy: buyPricedQty > EPSILON ? buyTotalCost / buyPricedQty : 0,
         avgSell: sellTotalQty > EPSILON ? sellTotalValue / sellTotalQty : 0,
         totalCostBasis: runningCostBasis,
+        buyTotalCost,
         realizedGains,
         totalGains,
         count: txs.length,

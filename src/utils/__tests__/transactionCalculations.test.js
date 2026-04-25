@@ -91,4 +91,54 @@ describe('transactionCalculations', () => {
         expect(stats.totalCostBasis).toBe(18000);
         expect(stats.totalGains).toBe(2000);
     });
+
+    it('falls back to original amount when FX rate is missing instead of returning 0', () => {
+        // quote_currency differs from target but fxRates is empty (not yet loaded)
+        const txs = [
+            {
+                date_iso: '2024-01-01T00:00:00.000Z',
+                way: 'BUY',
+                amount: 1,
+                quote_amount: 50000,
+                quote_currency: 'USD',
+            },
+        ];
+
+        const stats = computeCoinTransactionStats(txs, 55000, 1, {
+            targetCurrency: 'EUR',
+            fxRates: {}, // rate not loaded yet
+        });
+
+        // Should use 50000 as-is (not 0) so cost basis is preserved
+        expect(stats.totalCostBasis).toBe(50000);
+        expect(stats.avgBuy).toBe(50000);
+    });
+
+    it('avgBuy excludes 0-cost deposits so airdrops do not dilute the average', () => {
+        const txs = [
+            { date_iso: '2024-01-01T00:00:00.000Z', way: 'BUY', amount: 1, quote_amount: 50000 },
+            // Airdrop — no cost recorded
+            { date_iso: '2024-01-02T00:00:00.000Z', way: 'RECEIVE', amount: 1, quote_amount: 0 },
+        ];
+        const stats = computeCoinTransactionStats(txs, 55000, 2);
+        // avgBuy should only count the paid unit, not the free one
+        expect(stats.avgBuy).toBe(50000);
+        // totalCostBasis still covers both units' worth (1 paid unit @ 50k)
+        expect(stats.totalCostBasis).toBe(50000);
+    });
+
+    it('exposes buyTotalCost for accurate total return percentage', () => {
+        const txs = [
+            { date_iso: '2024-01-01T00:00:00.000Z', way: 'BUY', amount: 2, quote_amount: 100000 },
+            { date_iso: '2024-01-10T00:00:00.000Z', way: 'SELL', amount: 1, quote_amount: 60000 },
+        ];
+
+        const stats = computeCoinTransactionStats(txs, 55000, 1);
+
+        // totalGains = 10k realized + 5k unrealized = 15k
+        // totalReturnPct should use total invested (100k), not remaining basis (50k)
+        // 15k / 100k = 15%, not 30%
+        expect(stats.buyTotalCost).toBe(100000);
+        expect(stats.totalGains).toBe(15000);
+    });
 });

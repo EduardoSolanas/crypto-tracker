@@ -10,17 +10,32 @@ const COINGECKO_SYMBOL_OVERRIDES = {
     LUNA: 'terra-luna-2',
 };
 
-let coinGeckoCoinListPromise = null;
+// Only cache the list on success — a failed fetch (rate limit, timeout) must be retried.
+let coinGeckoCoinListCache = null;
+let coinGeckoCoinListInflight = null;
 
 async function fetchCoinGeckoCoinList() {
-    if (!coinGeckoCoinListPromise) {
-        const url = 'https://api.coingecko.com/api/v3/coins/list?include_platform=false';
-        coinGeckoCoinListPromise = fetch(url)
-            .then((res) => res.json())
-            .then((rows) => (Array.isArray(rows) ? rows : []))
-            .catch(() => []);
-    }
-    return coinGeckoCoinListPromise;
+    if (coinGeckoCoinListCache) return coinGeckoCoinListCache;
+    if (coinGeckoCoinListInflight) return coinGeckoCoinListInflight;
+
+    const url = 'https://api.coingecko.com/api/v3/coins/list?include_platform=false';
+    coinGeckoCoinListInflight = fetch(url)
+        .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        })
+        .then((rows) => {
+            const list = Array.isArray(rows) ? rows : [];
+            coinGeckoCoinListCache = list;   // persist only on success
+            coinGeckoCoinListInflight = null;
+            return list;
+        })
+        .catch((err) => {
+            coinGeckoCoinListInflight = null; // allow retry next time
+            throw err;
+        });
+
+    return coinGeckoCoinListInflight;
 }
 
 async function resolveCoinGeckoIds(symbols) {
@@ -36,7 +51,13 @@ async function resolveCoinGeckoIds(symbols) {
     const unresolved = unique.filter((sym) => !symbolToId[sym]);
     if (!unresolved.length) return symbolToId;
 
-    const coinList = await fetchCoinGeckoCoinList();
+    let coinList;
+    try {
+        coinList = await fetchCoinGeckoCoinList();
+    } catch (_e) {
+        // Coin list unavailable — only overridden symbols will resolve this call.
+        return symbolToId;
+    }
     const bySymbol = new Map();
     for (const coin of coinList) {
         const sym = String(coin?.symbol || '').toUpperCase();

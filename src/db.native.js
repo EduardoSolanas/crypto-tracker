@@ -1,6 +1,7 @@
 // src/db.native.js
 import * as SQLite from 'expo-sqlite';
 import { computeHoldingsFromTxns } from './csv';
+import { logger } from './utils/logger.js';
 
 let dbPromise;
 const debugLog = (...args) => {
@@ -251,31 +252,34 @@ export async function syncHoldingsForSymbol(symbol) {
     debugLog('[DB][native] syncHoldingsForSymbol:', symbol);
     const db = await getDb();
 
-    // Calculate new quantity directly in SQL for speed
     const result = await db.getFirstAsync(
         `
             SELECT SUM(
-                CASE 
+                CASE
                     WHEN way IN ('BUY', 'DEPOSIT', 'RECEIVE') THEN amount
                     WHEN way IN ('SELL', 'WITHDRAW', 'SEND') THEN -amount
                     ELSE 0
                 END
             ) as total
-            FROM transactions 
+            FROM transactions
             WHERE symbol = ?
         `,
         [symbol]
     );
 
     const newQty = result?.total ?? 0;
+    const QUANTITY_EPSILON = 0.00000001;
 
-    const holdings = await getHoldingsMap();
-    if (newQty <= 0) {
-        delete holdings[symbol];
+    if (newQty > QUANTITY_EPSILON) {
+        await db.runAsync(
+            `INSERT INTO holdings(symbol, quantity) VALUES (?, ?)
+             ON CONFLICT(symbol) DO UPDATE SET quantity = excluded.quantity`,
+            [symbol, newQty]
+        );
     } else {
-        holdings[symbol] = newQty;
+        await db.runAsync(`DELETE FROM holdings WHERE symbol = ?`, [symbol]);
     }
-    await upsertHoldings(holdings);
+
     return newQty;
 }
 
@@ -301,7 +305,7 @@ export async function saveCache(p, cData, d, r) {
         await setMeta('cached_range', r);
         await setMeta('cached_custom_ts', Date.now().toString());
     } catch (e) {
-        console.error('[DB][native] saveCache Error', e);
+        logger.error('[DB][native] saveCache Error', e);
     }
 }
 
@@ -323,7 +327,7 @@ export async function loadCache() {
             };
         }
     } catch (e) {
-        console.error('[DB][native] loadCache Error', e);
+        logger.error('[DB][native] loadCache Error', e);
     }
     return null;
 }

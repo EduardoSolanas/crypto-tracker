@@ -20,6 +20,7 @@ import { formatMoney, formatNumber } from '../utils/format';
 import { mapCandlesToPoints } from '../utils/chartContracts';
 import { getCoinChartFetchParams } from '../utils/coinChartRange';
 import { computeCoinTransactionStats } from '../utils/transactionCalculations';
+import { logger } from '../utils/logger.js';
 import { useTheme } from '../utils/theme';
 
 const CHART_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -51,14 +52,19 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
     const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const quoteCurrency = String(transaction.quote_currency || transaction.quoteCurrency || currency).toUpperCase();
-    const fxRate = quoteCurrency === currency ? 1 : Number(fxRates?.[quoteCurrency] || 0);
-    const normalizedQuoteAmount = fxRate > 0 ? (transaction.quote_amount || 0) * fxRate : (quoteCurrency === currency ? (transaction.quote_amount || 0) : 0);
+    const needsConversion = quoteCurrency !== currency;
+    const fxRate = needsConversion ? Number(fxRates?.[quoteCurrency] || 0) : 1;
+    // fxRate=0 means rate hasn't loaded yet — don't show wrong numbers.
+    const rateReady = !needsConversion || fxRate > 0;
+    const normalizedQuoteAmount = rateReady ? (transaction.quote_amount || 0) * fxRate : null;
 
-    const purchasePrice = transaction.amount > 0 ? normalizedQuoteAmount / transaction.amount : 0;
+    const purchasePrice = (normalizedQuoteAmount != null && transaction.amount > 0)
+        ? normalizedQuoteAmount / transaction.amount : null;
     const currentPrice = coinPrice || 0;
-    const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
-    const deltaVal = (currentPrice - purchasePrice) * transaction.amount;
-    const deltaColor = deltaVal >= 0 ? colors.success : colors.error;
+    const deltaPct = purchasePrice != null && purchasePrice > 0
+        ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : null;
+    const deltaVal = purchasePrice != null ? (currentPrice - purchasePrice) * transaction.amount : null;
+    const deltaColor = (deltaVal == null || deltaVal >= 0) ? colors.success : colors.error;
 
     return (
         <View style={[styles.txCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -76,7 +82,9 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                 <View style={styles.txRow}>
                     <View style={styles.txColLeft}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.priceLabel', { sym, currency })}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(purchasePrice, currency)}</Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {purchasePrice != null ? formatMoney(purchasePrice, currency) : '—'}
+                        </Text>
                     </View>
                     <View style={styles.txColRight}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.amountAdded') : t('coin.amountRemoved')}</Text>
@@ -86,7 +94,9 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                 <View style={[styles.txRow, styles.txRowGap]}>
                     <View style={styles.txColLeft}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.costInclFee') : t('coin.received')}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(normalizedQuoteAmount, currency)}</Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {normalizedQuoteAmount != null ? formatMoney(normalizedQuoteAmount, currency) : '—'}
+                        </Text>
                     </View>
                     <View style={styles.txColRight}>
                         <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.currentWorth')}</Text>
@@ -97,7 +107,10 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
                 <View style={styles.txDeltaRow}>
                     <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.delta')}</Text>
                     <Text style={[styles.txDeltaValue, { color: deltaColor }]}>
-                        {deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(2)}% ({formatMoney(deltaVal, currency)})
+                        {deltaPct != null
+                            ? `${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(2)}% (${formatMoney(deltaVal, currency)})`
+                            : '—'
+                        }
                     </Text>
                 </View>
             </View>
@@ -195,7 +208,7 @@ export default function CoinScreen() {
                     }
                 }
             } catch (e) {
-                if (globalThis.__DEV__) console.error('Initial load error:', e);
+                logger.error('Initial load error:', e);
             } finally {
                 safeSetState(setLoading, false);
             }
@@ -304,9 +317,10 @@ export default function CoinScreen() {
             targetCurrency: currency,
             fxRates,
         });
-        const totalGainsPct = stats.totalCostBasis > 0
-            ? (stats.totalGains / stats.totalCostBasis) * 100
-            : 0;
+        // Use total invested (buyTotalCost) as denominator so partial sells don't inflate the %.
+        // E.g. buy 2 BTC @$50k, sell 1 @$60k: totalGains=$15k, buyTotalCost=$100k → 15%, not 30%.
+        const pctBase = stats.buyTotalCost > 0 ? stats.buyTotalCost : stats.totalCostBasis;
+        const totalGainsPct = pctBase > 0 ? (stats.totalGains / pctBase) * 100 : 0;
         return { ...stats, totalGainsPct };
     }, [currency, fxRates, txs, coin]);
 

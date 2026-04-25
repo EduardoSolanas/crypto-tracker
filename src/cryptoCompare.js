@@ -1,4 +1,5 @@
 import { cryptoService } from './services/crypto/CryptoService.js';
+import { logger } from './utils/logger.js';
 
 const asNumber = (v) => {
     const n = Number(v);
@@ -389,7 +390,7 @@ async function fetchBinancePrices(holdingsMap, currency) {
 
             // If we relied on USD rate but it failed
             if (finalRate === 0) {
-                 console.warn(`[Binance] Missing FX rate for ${target}, cannot convert ${sym}`);
+                 logger.warn(`[Binance] Missing FX rate for ${target}, cannot convert ${sym}`);
                  // We have a price in USD but can't convert. Treating as 0 price effectively.
                  finalRate = 0;
             }
@@ -413,7 +414,7 @@ async function fetchBinancePrices(holdingsMap, currency) {
             });
 
         } catch (e) {
-            console.warn(`[Binance] Error fetching ${sym}:`, e.message);
+            logger.warn(`[Binance] Error fetching ${sym}:`, e.message);
             // Return fallback/empty entry so we don't crash
             portfolio.push({
                 symbol: sym,
@@ -483,13 +484,13 @@ export async function fetchPortfolioPrices(holdingsMap, currency) {
         return portfolio;
 
     } catch (e) {
-        console.warn('[CoinGecko] Primary pricing failed:', e?.message || e);
+        logger.warn('[CoinGecko] Primary pricing failed:', e?.message || e);
         try {
             const ccRows = await fetchPortfolioPricesFromCryptoCompare(holdingsMap, currency);
             const hasAnyPrice = ccRows.some((r) => asNumber(r?.price) > 0);
             if (hasAnyPrice) return ccRows.sort((a, b) => b.value - a.value);
         } catch (ccErr) {
-            console.warn('[CryptoCompare] Pricing fallback failed:', ccErr?.message || ccErr);
+            logger.warn('[CryptoCompare] Pricing fallback failed:', ccErr?.message || ccErr);
         }
         return await fetchBinancePrices(holdingsMap, currency);
     }
@@ -522,7 +523,26 @@ export async function fetchFxRates(fromCurrencies, toCurrency) {
             }
         }
     } catch (_e) {
-        // Keep partial rates only.
+        // Try open.er-api.com as fallback for fiat-to-fiat rates.
+    }
+
+    const stillMissing = missing.filter((code) => !(code in rateMap));
+    if (stillMissing.length > 0) {
+        try {
+            const fxRes = await fetch(`https://open.er-api.com/v6/latest/${target}`);
+            const fxJson = await fxRes.json();
+            if (fxJson?.result === 'success' && fxJson.rates) {
+                for (const code of stillMissing) {
+                    const rate = Number(fxJson.rates[code]);
+                    if (Number.isFinite(rate) && rate > 0) {
+                        // er-api returns rates FROM target, so rate is target→code — invert
+                        rateMap[code] = 1 / rate;
+                    }
+                }
+            }
+        } catch (_e) {
+            // No FX fallback available; callers handle missing keys gracefully.
+        }
     }
 
     return rateMap;
@@ -558,7 +578,7 @@ async function fetchBinanceCandles(symbol, currency, timeframe, limit) {
         }));
 
     } catch (e) {
-        console.warn(`[BinanceHist] Failed for ${symbol}:`, e.message);
+        logger.warn(`[BinanceHist] Failed for ${symbol}:`, e.message);
         return [];
     }
 }

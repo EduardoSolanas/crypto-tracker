@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="42%" r="68%">
+      <stop offset="0%" stop-color="#1B3F60"/>
+      <stop offset="100%" stop-color="#0A1E33"/>
+    </radialGradient>
+    <linearGradient id="goldBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD84A"/>
+      <stop offset="100%" stop-color="#C88800"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="cyanGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="230" ry="230" fill="url(#bgGrad)"/>
+
+  <!-- Subtle inner border -->
+  <rect x="2" y="2" width="1020" height="1020" rx="228" ry="228"
+        fill="none" stroke="#2A5575" stroke-width="3" opacity="0.5"/>
+
+  <!-- ── CHART EMBLEM ── centered in ~300–724 x / 260–760 y ── -->
+  <g>
+    <!-- Baseline -->
+    <line x1="240" y1="748" x2="784" y2="748"
+          stroke="#2A5575" stroke-width="5" stroke-linecap="round" opacity="0.8"/>
+
+    <!-- Candle 1 — x=300 -->
+    <!-- Wick -->
+    <line x1="300" y1="618" x2="300" y2="748" stroke="#C88800" stroke-width="7" stroke-linecap="round"/>
+    <!-- Body (bearish/small) -->
+    <rect x="270" y="648" width="60" height="72" rx="9" fill="url(#goldBody)" opacity="0.8" filter="url(#glow)"/>
+
+    <!-- Candle 2 — x=424 -->
+    <line x1="424" y1="536" x2="424" y2="668" stroke="#C88800" stroke-width="7" stroke-linecap="round"/>
+    <rect x="394" y="560" width="60" height="84" rx="9" fill="url(#goldBody)" opacity="0.9" filter="url(#glow)"/>
+
+    <!-- Candle 3 — x=548 (tallest, brightest) -->
+    <line x1="548" y1="424" x2="548" y2="576" stroke="#FFD84A" stroke-width="8" stroke-linecap="round"/>
+    <rect x="518" y="448" width="60" height="100" rx="9" fill="url(#goldBody)" filter="url(#glow)"/>
+
+    <!-- Candle 4 — x=672 -->
+    <line x1="672" y1="332" x2="672" y2="492" stroke="#FFD84A" stroke-width="8" stroke-linecap="round"/>
+    <rect x="642" y="356" width="60" height="108" rx="9" fill="url(#goldBody)" filter="url(#glow)"/>
+
+    <!-- Trend line glow halo -->
+    <polyline
+      points="240,748  360,658  484,556  608,444  748,320"
+      fill="none" stroke="#4ECDC4" stroke-width="26"
+      stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+
+    <!-- Trend line main -->
+    <polyline
+      points="240,748  360,658  484,556  608,444  748,320"
+      fill="none" stroke="#4ECDC4" stroke-width="10"
+      stroke-linecap="round" stroke-linejoin="round"
+      filter="url(#cyanGlow)" opacity="0.95"/>
+
+    <!-- Arrowhead -->
+    <polygon points="748,320  714,342  722,304" fill="#4ECDC4" filter="url(#cyanGlow)"/>
+
+    <!-- Dots on trend line at each candle midpoint -->
+    <circle cx="360" cy="658" r="12" fill="#4ECDC4" opacity="0.85" filter="url(#cyanGlow)"/>
+    <circle cx="484" cy="556" r="12" fill="#4ECDC4" opacity="0.85" filter="url(#cyanGlow)"/>
+    <circle cx="608" cy="444" r="12" fill="#4ECDC4" opacity="0.85" filter="url(#cyanGlow)"/>
+  </g>
+
+  <!-- Subtle corner hex accent (bottom-left) -->
+  <circle cx="220" cy="804" r="36" fill="none" stroke="#FFD84A" stroke-width="5" opacity="0.22"/>
+</svg>

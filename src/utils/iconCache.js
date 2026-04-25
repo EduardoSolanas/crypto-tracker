@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import { logger } from './logger.js';
 
 // CryptoCompare base URL for images
 const CC_IMAGE_BASE = 'https://www.cryptocompare.com';
@@ -26,7 +27,7 @@ async function ensureCacheDir() {
             await FileSystem.makeDirectoryAsync(iconCacheDir, { intermediates: true });
         }
     } catch (_e) {
-        console.warn('[IconCache] Failed to create cache directory:', _e.message);
+        logger.warn('[IconCache] Failed to create cache directory:', _e.message);
     }
 }
 
@@ -117,12 +118,12 @@ export async function getCachedIconUri(symbol, imageUrlPath = null) {
             return localPath;
         } else {
             // Download failed, return remote URL as fallback
-            console.warn(`[IconCache] Failed to download icon for ${symbol}, status: ${downloadResult.status}`);
+            logger.warn(`[IconCache] Failed to download icon for ${symbol}, status: ${downloadResult.status}`);
             memoryCache[upperSymbol] = remoteUrl;
             return remoteUrl;
         }
     } catch (_e) {
-        console.warn(`[IconCache] Error caching icon for ${symbol}:`, _e.message);
+        logger.warn(`[IconCache] Error caching icon for ${symbol}:`, _e.message);
         // Return remote URL as fallback
         const remoteUrl = getRemoteUrl(symbol, imageUrlPath);
         memoryCache[upperSymbol] = remoteUrl;
@@ -173,7 +174,7 @@ export async function clearIconCache() {
         // Clear memory cache
         Object.keys(memoryCache).forEach(key => delete memoryCache[key]);
     } catch (_e) {
-        console.warn('[IconCache] Failed to clear cache:', _e.message);
+        logger.warn('[IconCache] Failed to clear cache:', _e.message);
     }
 }
 

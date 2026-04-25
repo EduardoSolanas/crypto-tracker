@@ -139,7 +139,7 @@ export default function AddTransactionScreen() {
                     testID="add-tx-title"
                     accessibilityLabel="add-tx-title"
                 >
-                    {t('addTransaction.title')}
+                    {txId ? t('addTransaction.editTitle') : t('addTransaction.title')}
                 </Text>
                 <View style={{ width: 40 }} />
             </View>

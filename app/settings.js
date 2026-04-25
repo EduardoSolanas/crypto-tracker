@@ -13,6 +13,7 @@ import { exportTransactionsToCSV, parseDeltaCsvWithReport } from '../src/csv';
 import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, setMeta } from '../src/db';
 import i18n, { getSystemLanguage } from '../src/i18n';
 import { getCurrencyOptions } from '../src/utils/currencies';
+import { logger } from '../src/utils/logger.js';
 import { SUPPORTED_LANGUAGES } from '../src/utils/languages';
 import { useTheme } from '../src/utils/theme';
 
@@ -59,9 +60,7 @@ export default function SettingsScreen() {
                 const resolvedLanguage = nextLanguage === 'system' ? getSystemLanguage() : nextLanguage;
                 await i18n.changeLanguage(resolvedLanguage);
             } catch (e) {
-                if (globalThis.__DEV__) {
-                    console.error(e);
-                }
+                logger.error('[Settings] load error:', e);
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -232,7 +231,7 @@ export default function SettingsScreen() {
             }
         } catch (e) {
             if (globalThis.__DEV__) {
-                console.error('Export error:', e);
+                logger.error('Export error:', e);
             }
             Alert.alert(tr('settings.exportError', 'Export error'), e?.message ?? String(e));
         } finally {
