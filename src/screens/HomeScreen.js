@@ -16,8 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CoinIcon from '../components/CoinIcon';
 import CryptoGraph from '../components/CryptoGraph';
-import { fetchCandles, fetchFxRates, fetchPortfolioPrices } from '../cryptoCompare';
-import { computeCoinTransactionStats } from '../utils/transactionCalculations';
+import { fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
 import { computeHoldingsFromTxns, parseDeltaCsvWithReport } from '../csv';
 import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, loadCache, saveCache } from '../db';
 import { formatMoney } from '../utils/format';
@@ -78,7 +77,6 @@ export default function HomeScreen() {
     );
 
     const [coinDeltas, setCoinDeltas] = useState({});
-    const [portfolioTotalStats, setPortfolioTotalStats] = useState({ totalInvested: 0, totalGains: 0, totalGainsPct: 0 });
     const [showSmallBalances, setShowSmallBalances] = useState(false);
     const isMountedRef = useRef(true);
 
@@ -217,33 +215,6 @@ export default function HomeScreen() {
 
             if (currentPortfolio?.length) {
                 saveCache(currentPortfolio, chartData, delta, selectedRange);
-            }
-
-            // Compute all-time portfolio P&L
-            if (allTxns?.length && currentPortfolio?.length) {
-                const quoteCurrencies = [...new Set(
-                    allTxns.map(t => t.quote_currency || t.quoteCurrency).filter(Boolean)
-                )];
-                const rates = await fetchFxRates(quoteCurrencies, selectedCurrency);
-                const txsBySymbol = {};
-                for (const t of allTxns) {
-                    if (!txsBySymbol[t.symbol]) txsBySymbol[t.symbol] = [];
-                    txsBySymbol[t.symbol].push(t);
-                }
-                let totalInvested = 0;
-                let totalGains = 0;
-                for (const coin of currentPortfolio) {
-                    const coinTxns = txsBySymbol[coin.symbol] || [];
-                    if (!coinTxns.length) continue;
-                    const stats = computeCoinTransactionStats(coinTxns, coin.price || 0, coin.quantity || 0, {
-                        targetCurrency: selectedCurrency,
-                        fxRates: rates,
-                    });
-                    totalInvested += stats.buyTotalCost;
-                    totalGains += stats.totalGains;
-                }
-                const totalGainsPct = totalInvested > 0.01 ? (totalGains / totalInvested) * 100 : 0;
-                safeSetState(setPortfolioTotalStats, { totalInvested, totalGains, totalGainsPct });
             }
 
         } catch (e) {
@@ -495,21 +466,6 @@ export default function HomeScreen() {
                                 </Text>
                             </View>
                         </View>
-                        {portfolioTotalStats.totalInvested > 0.01 && (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                                <Text style={[styles.allTimeLabel, { color: colors.textSecondary }]}>
-                                    {tr('home.allTime', 'All-time')}
-                                </Text>
-                                <Text style={[styles.allTimeValue, { color: portfolioTotalStats.totalGains >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                    {portfolioTotalStats.totalGains >= 0 ? '+' : ''}{formatMoney(portfolioTotalStats.totalGains, currency)}
-                                </Text>
-                                <View style={[styles.pctBadge, { backgroundColor: (portfolioTotalStats.totalGains >= 0 ? '#22c55e' : '#ef4444') + '20', marginLeft: 4 }]}>
-                                    <Text style={[styles.pctText, { color: portfolioTotalStats.totalGains >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                        {portfolioTotalStats.totalGainsPct >= 0 ? '+' : ''}{portfolioTotalStats.totalGainsPct.toFixed(2)}%
-                                    </Text>
-                                </View>
-                            </View>
-                        )}
                     </View>
                     <TouchableOpacity onPress={() => router.push('/settings')} style={styles.settingsBtn}>
                         <Feather name="settings" size={24} color={colors.text} />
@@ -643,8 +599,6 @@ const styles = StyleSheet.create({
     delta: { fontSize: 16, fontWeight: '600', marginRight: 8 },
     pctBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
     pctText: { fontSize: 12, fontWeight: 'bold' },
-    allTimeLabel: { fontSize: 12, marginRight: 6 },
-    allTimeValue: { fontSize: 13, fontWeight: '600', marginRight: 4 },
     settingsBtn: { padding: 8 },
     assetsHeader: { paddingHorizontal: 16, marginBottom: 12, marginTop: 8 },
     sectionTitle: { fontSize: 20, fontWeight: 'bold' },
