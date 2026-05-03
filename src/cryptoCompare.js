@@ -589,13 +589,17 @@ export async function fetchHistory(symbol, currency, limit = 30) {
 }
 
 export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 30, aggregate = 1) {
-    try {
-        const cgCandles = await fetchCoinGeckoCandles(symbol, currency, timeframe, limit, aggregate);
-        if (cgCandles.length > 0) {
-            return cgCandles;
+    // CoinGecko OHLC is day-window based and can distort intraday views.
+    // Use exact minute/hour endpoints first for 1H, 1D, and 1W chart ranges.
+    if (timeframe === 'day') {
+        try {
+            const cgCandles = await fetchCoinGeckoCandles(symbol, currency, timeframe, limit, aggregate);
+            if (cgCandles.length > 0) {
+                return cgCandles;
+            }
+        } catch (_e) {
+            // Continue to CryptoCompare fallback
         }
-    } catch (_e) {
-        // Continue to CryptoCompare fallback
     }
 
     try {

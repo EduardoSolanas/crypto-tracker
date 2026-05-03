@@ -157,6 +157,16 @@ export const computePortfolioHistory = async ({
         return toLinePoint(tPoint * 1000, val);
     });
 
+    const currentIncludedValue = currentPortfolio?.reduce((total, item) => {
+        if (!significantSymbols.has(item.symbol)) return total;
+        return total + Number(item.value || 0);
+    }, 0) || 0;
+
+    if (currentIncludedValue > 0 && graphPoints.length > 0) {
+        const lastIndex = graphPoints.length - 1;
+        graphPoints[lastIndex] = toLinePoint(graphPoints[lastIndex].timestamp, currentIncludedValue);
+    }
+
     // --- 4. POST-PROCESS ---
     const firstActiveIndex = graphPoints.findIndex(p => p.value > 0.0001);
 

@@ -101,6 +101,36 @@ describe('computePortfolioHistory', () => {
             expect(lastPoint.value).toBeCloseTo(104000, -2);
             expect(result.delta.val).toBeGreaterThan(0); // Price increased
         });
+
+        it('anchors the latest point to the current portfolio value when candles lag', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const btcHistory = [
+                { time: nowSec - 3600, close: 50000 },
+                { time: nowSec - 1800, close: 51000 },
+                { time: nowSec - 300, close: 51000 }
+            ];
+
+            mockFetchCandles.mockResolvedValue(btcHistory);
+
+            const txns = [{
+                dateISO: new Date((nowSec - 7200) * 1000).toISOString(),
+                symbol: 'BTC',
+                amount: 2,
+                way: 'BUY'
+            }];
+
+            const portfolio = [{ symbol: 'BTC', value: 104000, quantity: 2, price: 52000, change24h: 4 }];
+
+            const result = await computePortfolioHistory({
+                allTxns: txns,
+                currentPortfolio: portfolio,
+                currency: 'USD',
+                range: '1H',
+                fetchCandles: mockFetchCandles
+            });
+
+            expect(result.chartData[result.chartData.length - 1].value).toBe(104000);
+        });
     });
 
     describe('1D View', () => {

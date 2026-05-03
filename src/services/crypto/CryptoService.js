@@ -26,8 +26,8 @@ class CryptoService {
             logger.warn('[CryptoService] FX rate fetch failed:', e);
         }
 
-        // Fall back to 1 (show USD prices) rather than returning 0 and wiping all values.
-        return 1;
+        // Do not label raw USD prices as the selected currency if conversion fails.
+        return 0;
     }
 
     async getPortfolio(holdingsMap, currency) {

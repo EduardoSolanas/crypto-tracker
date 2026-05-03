@@ -193,6 +193,7 @@ jest.mock('react-native-svg', () => {
     const MockSvg = ({ children, ...props }) => React.createElement('View', { testID: 'svg', ...props }, children);
     const MockPath = (props) => React.createElement('View', { testID: 'svg-path', ...props });
     const MockLine = (props) => React.createElement('View', { testID: 'svg-line', ...props });
+    const MockRect = (props) => React.createElement('View', { testID: 'svg-rect', ...props });
     const MockDefs = ({ children }) => React.createElement('View', null, children);
     const MockLinearGradient = ({ children }) => React.createElement('View', null, children);
     const MockStop = () => null;
@@ -202,6 +203,7 @@ jest.mock('react-native-svg', () => {
         Svg: MockSvg,
         Path: MockPath,
         Line: MockLine,
+        Rect: MockRect,
         Defs: MockDefs,
         LinearGradient: MockLinearGradient,
         Stop: MockStop,

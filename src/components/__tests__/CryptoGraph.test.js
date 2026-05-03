@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react-native';
-import CryptoGraph from '../CryptoGraph';
+import { fireEvent, render } from '@testing-library/react-native';
+import CryptoGraph, { buildSmoothPath } from '../CryptoGraph';
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
@@ -32,6 +32,26 @@ jest.mock('react-native-wagmi-charts', () => {
 });
 
 describe('CryptoGraph', () => {
+    describe('Path smoothing', () => {
+        it('uses cubic curve commands for three or more points', () => {
+            const points = [
+                { x: 0, y: 100 },
+                { x: 50, y: 20 },
+                { x: 100, y: 80 },
+            ];
+
+            const path = buildSmoothPath(points);
+
+            expect(path).toMatch(/^M 0 100 C /);
+            expect(path).toContain('100 80');
+            expect(path).not.toContain(' L 50 20 ');
+        });
+
+        it('keeps two-point paths as a straight line', () => {
+            expect(buildSmoothPath([{ x: 0, y: 100 }, { x: 50, y: 20 }])).toBe('M 0 100 L 50 20');
+        });
+    });
+
     describe('Basic Rendering', () => {
         it('renders empty view when no data is provided', () => {
             const { queryByTestId } = render(<CryptoGraph data={[]} />);
@@ -46,6 +66,42 @@ describe('CryptoGraph', () => {
             const chart = queryByTestId('line-chart');
             expect(chart).toBeTruthy();
             expect(chart.props.style.width).toBe(0);
+        });
+
+        it('toggles a line graph to candlestick style from the chart button', () => {
+            const mockData = [
+                { timestamp: Date.now() - 120000, value: 50000 },
+                { timestamp: Date.now() - 60000, value: 51000 },
+                { timestamp: Date.now(), value: 50500 },
+            ];
+
+            const { getByTestId, queryByTestId } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            expect(getByTestId('line-chart')).toBeTruthy();
+            fireEvent.press(getByTestId('graph-chart-style-toggle'));
+
+            expect(queryByTestId('line-chart')).toBeNull();
+            expect(getByTestId('candlestick-chart')).toBeTruthy();
+            expect(getByTestId('graph-candle-1')).toBeTruthy();
+        });
+
+        it('toggles a candlestick graph back to line style', () => {
+            const mockData = [
+                { timestamp: Date.now() - 60000, open: 48000, high: 52000, low: 47000, close: 51000 },
+                { timestamp: Date.now(), open: 51000, high: 53000, low: 50000, close: 52500 },
+            ];
+
+            const { getByTestId, queryByTestId } = render(
+                <CryptoGraph type="candle" data={mockData} currency="USD" />
+            );
+
+            expect(getByTestId('candlestick-chart')).toBeTruthy();
+            fireEvent.press(getByTestId('graph-chart-style-toggle'));
+
+            expect(queryByTestId('candlestick-chart')).toBeNull();
+            expect(getByTestId('line-chart')).toBeTruthy();
         });
     });
 

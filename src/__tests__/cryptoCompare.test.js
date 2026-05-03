@@ -1,4 +1,4 @@
-import { __resetCryptoProviderCachesForTesting, fetchPortfolioPrices } from '../cryptoCompare';
+import { __resetCryptoProviderCachesForTesting, fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
 
 function jsonResponse(body, ok = true) {
     return {
@@ -91,7 +91,7 @@ describe('fetchPortfolioPrices pricing cascade', () => {
         expect(global.fetch).toHaveBeenCalledTimes(3);
     });
 
-    it('falls back to USD prices (fxRate=1) when CryptoCompare FX is unavailable', async () => {
+    it('returns zero price when CryptoCompare FX is unavailable', async () => {
         // Mock 1: CoinGecko USD
         global.fetch.mockResolvedValueOnce(
             jsonResponse({
@@ -104,8 +104,8 @@ describe('fetchPortfolioPrices pricing cascade', () => {
 
         const result = await fetchPortfolioPrices({ BTC: 1 }, 'JPY');
 
-        // CryptoService falls back to fxRate=1 rather than zeroing values when FX fetch fails
-        expect(result[0].price).toBe(90000);
+        // Avoid labeling raw USD as the requested target currency when conversion fails.
+        expect(result[0].price).toBe(0);
     });
 
     it('returns zeroed row when all providers fail to price the symbol', async () => {
@@ -157,5 +157,37 @@ describe('fetchPortfolioPrices pricing cascade', () => {
 
         expect(result[0].price).toBe(32000); // 40000 * 0.8
         expect(result[0].value).toBe(32000);
+    });
+});
+
+describe('fetchCandles chart history routing', () => {
+    beforeEach(() => {
+        global.fetch = jest.fn();
+        __resetCryptoProviderCachesForTesting();
+    });
+
+    afterEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('uses intraday minute history for 1H data instead of CoinGecko day OHLC', async () => {
+        global.fetch.mockResolvedValueOnce(
+            jsonResponse({
+                Data: {
+                    Data: [
+                        { time: 1000, open: 10, high: 12, low: 9, close: 11 },
+                        { time: 1300, open: 11, high: 13, low: 10, close: 12 },
+                    ],
+                },
+            })
+        );
+
+        const result = await fetchCandles('BTC', 'USD', 'minute', 12, 5);
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch.mock.calls[0][0]).toContain('/histominute?');
+        expect(global.fetch.mock.calls[0][0]).toContain('limit=12');
+        expect(global.fetch.mock.calls[0][0]).toContain('aggregate=5');
+        expect(result).toHaveLength(2);
     });
 });
