@@ -1,6 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import Feather from '@expo/vector-icons/Feather';
+import Constants from 'expo-constants';
 import { Stack, router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +17,11 @@ import { getCurrencyOptions } from '../src/utils/currencies';
 import { logger } from '../src/utils/logger.js';
 import { SUPPORTED_LANGUAGES } from '../src/utils/languages';
 import { useTheme } from '../src/utils/theme';
+
+const fallbackBuildNumber = appJson.expo.android?.versionCode || appJson.expo.ios?.buildNumber;
+const appVersion = Constants.nativeAppVersion || appJson.expo.version;
+const appBuildNumber = Constants.nativeBuildVersion || (fallbackBuildNumber ? String(fallbackBuildNumber) : '');
+const displayVersion = appBuildNumber ? `v${appVersion} (${appBuildNumber})` : `v${appVersion}`;
 
 export default function SettingsScreen() {
     const { colors } = useTheme();
@@ -276,7 +282,7 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{tr('settings.title', 'Settings')}</Text>
                 <Text style={[styles.versionText, { color: colors.textSecondary }]}>
-                    v{appJson.expo.version}
+                    {displayVersion}
                 </Text>
             </View>
 

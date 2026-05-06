@@ -15,6 +15,14 @@ jest.mock('expo-router', () => ({
     },
 }));
 
+jest.mock('expo-constants', () => ({
+    __esModule: true,
+    default: {
+        nativeAppVersion: '1.1.1',
+        nativeBuildVersion: '42',
+    },
+}));
+
 // Vector icons can pull in native setup; replace with a plain component for stable render tests.
 jest.mock('@expo/vector-icons/Feather', () => {
     const React = require('react');
@@ -68,11 +76,11 @@ describe('SettingsScreen', () => {
         });
     });
 
-    it('displays the build version at the top right', async () => {
+    it('displays the app version and native build number at the top right', async () => {
         const { getByText } = render(<SettingsScreen />);
 
         await waitFor(() => {
-            const versionText = getByText('v1.1.1');
+            const versionText = getByText('v1.1.1 (42)');
             expect(versionText).toBeTruthy();
         });
     });
