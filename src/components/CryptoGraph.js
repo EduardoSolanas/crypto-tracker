@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Dimensions, Text, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop, Line, Rect } from 'react-native-svg';
 import { useTheme } from '../utils/theme';
@@ -104,16 +104,14 @@ export default React.memo(function CryptoGraph({
 }) {
     const { colors, isDark } = useTheme();
     const screenWidth = width || Dimensions.get('window').width;
-    const [chartStyle, setChartStyle] = useState(() => (
-        type === 'candle' || type === 'candlestick' ? 'candle' : 'line'
-    ));
+    const isCandlestickType = type === 'candle' || type === 'candlestick';
 
     // All expensive data-crunching is memoised — only re-runs when the inputs
     // that affect the computed path / labels actually change.
     const computed = useMemo(() => {
         if (!data || data.length === 0) return null;
 
-        const isCandlestick = chartStyle === 'candle';
+        const isCandlestick = isCandlestickType;
         const padding = 20;
         const chartHeight = height - padding * 2;
         const n = data.length;
@@ -215,7 +213,7 @@ export default React.memo(function CryptoGraph({
         const axisLabels = getAxisLabels(min, max, currency);
 
         return { linePath, fillPath, axisLabels, isCandlestick, candleItems };
-    }, [data, screenWidth, height, chartStyle, currency]); // `color` not needed — only affects SVG props below
+    }, [data, screenWidth, height, isCandlestickType, currency]); // `color` not needed — only affects SVG props below
 
     if (loading) {
         return (
@@ -256,7 +254,6 @@ export default React.memo(function CryptoGraph({
 
     const { linePath, fillPath, axisLabels, isCandlestick, candleItems } = computed;
     const gridColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.15)';
-    const toggleTo = chartStyle === 'line' ? 'candlestick' : 'line';
 
     return (
         <View style={{ height: height + 60 }}>
@@ -345,46 +342,6 @@ export default React.memo(function CryptoGraph({
                     </View>
                 )}
 
-                <TouchableOpacity
-                    testID="graph-chart-style-toggle"
-                    accessibilityLabel={`Switch to ${toggleTo} chart`}
-                    onPress={() => setChartStyle((current) => current === 'line' ? 'candle' : 'line')}
-                    style={{
-                        position: 'absolute',
-                        right: 12,
-                        bottom: 10,
-                        width: 34,
-                        height: 34,
-                        borderRadius: 17,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: isDark ? 'rgba(15,23,42,0.78)' : 'rgba(255,255,255,0.88)',
-                        borderWidth: 1,
-                        borderColor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.14)',
-                    }}
-                >
-                    <Svg width={18} height={18} viewBox="0 0 18 18">
-                        {chartStyle === 'line' ? (
-                            <>
-                                <Line x1={4} y1={13} x2={4} y2={4} stroke={colors.text} strokeWidth={1.5} strokeLinecap="round" />
-                                <Rect x={2.5} y={7} width={3} height={5} rx={0.7} fill={colors.text} />
-                                <Line x1={9} y1={15} x2={9} y2={3} stroke={colors.text} strokeWidth={1.5} strokeLinecap="round" />
-                                <Rect x={7.5} y={5} width={3} height={7} rx={0.7} fill={colors.text} />
-                                <Line x1={14} y1={12} x2={14} y2={2} stroke={colors.text} strokeWidth={1.5} strokeLinecap="round" />
-                                <Rect x={12.5} y={4} width={3} height={4} rx={0.7} fill={colors.text} />
-                            </>
-                        ) : (
-                            <Path
-                                d="M2 12 L6 8 L9 10 L14 4"
-                                fill="none"
-                                stroke={colors.text}
-                                strokeWidth={2}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        )}
-                    </Svg>
-                </TouchableOpacity>
             </View>
 
             {onRangeChange && (

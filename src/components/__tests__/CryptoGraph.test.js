@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import CryptoGraph, { buildSmoothPath } from '../CryptoGraph';
 
 jest.mock('react-native-wagmi-charts', () => {
@@ -68,7 +68,7 @@ describe('CryptoGraph', () => {
             expect(chart.props.style.width).toBe(0);
         });
 
-        it('toggles a line graph to candlestick style from the chart button', () => {
+        it('does not render a chart style toggle button', () => {
             const mockData = [
                 { timestamp: Date.now() - 120000, value: 50000 },
                 { timestamp: Date.now() - 60000, value: 51000 },
@@ -80,28 +80,7 @@ describe('CryptoGraph', () => {
             );
 
             expect(getByTestId('line-chart')).toBeTruthy();
-            fireEvent.press(getByTestId('graph-chart-style-toggle'));
-
-            expect(queryByTestId('line-chart')).toBeNull();
-            expect(getByTestId('candlestick-chart')).toBeTruthy();
-            expect(getByTestId('graph-candle-1')).toBeTruthy();
-        });
-
-        it('toggles a candlestick graph back to line style', () => {
-            const mockData = [
-                { timestamp: Date.now() - 60000, open: 48000, high: 52000, low: 47000, close: 51000 },
-                { timestamp: Date.now(), open: 51000, high: 53000, low: 50000, close: 52500 },
-            ];
-
-            const { getByTestId, queryByTestId } = render(
-                <CryptoGraph type="candle" data={mockData} currency="USD" />
-            );
-
-            expect(getByTestId('candlestick-chart')).toBeTruthy();
-            fireEvent.press(getByTestId('graph-chart-style-toggle'));
-
-            expect(queryByTestId('candlestick-chart')).toBeNull();
-            expect(getByTestId('line-chart')).toBeTruthy();
+            expect(queryByTestId('graph-chart-style-toggle')).toBeNull();
         });
     });
 

@@ -6,6 +6,25 @@ import { logger } from './logger.js';
 const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
 const MIN_QUANTITY = 0.00000001;  // Dust threshold for filtering tiny amounts
 
+const getInterpolatedClose = (history, pointer, timestampSec) => {
+    const current = history[pointer];
+    if (!current) return 0;
+
+    const currentClose = Number(current.close || 0);
+    const next = history[pointer + 1];
+    if (!next || timestampSec <= current.time) return currentClose;
+
+    const nextClose = Number(next.close || 0);
+    const currentTime = Number(current.time || 0);
+    const nextTime = Number(next.time || 0);
+    if (!Number.isFinite(currentClose) || !Number.isFinite(nextClose) || nextTime <= currentTime) {
+        return currentClose;
+    }
+
+    const progress = Math.min(Math.max((timestampSec - currentTime) / (nextTime - currentTime), 0), 1);
+    return currentClose + (nextClose - currentClose) * progress;
+};
+
 export const computePortfolioHistory = async ({
     allTxns,
     currentPortfolio,
@@ -149,10 +168,7 @@ export const computePortfolioHistory = async ({
             }
             historyPointers[sym] = ptr;
 
-            // Always use the last known price. The pointer is already at the closest
-            // candle at or before tPoint. Requiring a time-window check caused gaps
-            // when candle timestamps didn't align perfectly with simulated time points.
-            val += qty * hist[ptr].close;
+            val += qty * getInterpolatedClose(hist, ptr, tPoint);
         }
         return toLinePoint(tPoint * 1000, val);
     });

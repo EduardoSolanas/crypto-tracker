@@ -570,8 +570,9 @@ data,data,data`;
                 fetchCandles: mockFetchCandles
             });
 
-            // Delta should be calculated from the first active point to the live portfolio value.
-            expect(result.delta.val).toBeCloseTo(5000, -1);
+            // Delta should be calculated from the first active sampled point to the live portfolio value.
+            expect(result.delta.val).toBeGreaterThan(4900);
+            expect(result.delta.val).toBeLessThan(5100);
         });
 
         it('handles assets with very small quantities', async () => {

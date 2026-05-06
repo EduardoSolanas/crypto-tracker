@@ -195,6 +195,39 @@ describe('computePortfolioHistory', () => {
             const lastPoint = result.chartData[result.chartData.length - 1];
             expect(lastPoint.value).toBeCloseTo(30000, -2);
         });
+
+        it('interpolates between sparse candles instead of holding flat until the next candle', async () => {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const rangeStart = nowSec - 86400;
+            const ethHistory = [
+                { time: rangeStart, close: 100 },
+                { time: rangeStart + 43200, close: 200 },
+                { time: nowSec, close: 300 }
+            ];
+
+            mockFetchCandles.mockResolvedValue(ethHistory);
+
+            const result = await computePortfolioHistory({
+                allTxns: [{
+                    dateISO: new Date((rangeStart - 3600) * 1000).toISOString(),
+                    symbol: 'ETH',
+                    amount: 1,
+                    way: 'BUY'
+                }],
+                currentPortfolio: [{ symbol: 'ETH', value: 300, quantity: 1, price: 300, change24h: 200 }],
+                currency: 'USD',
+                range: '1D',
+                fetchCandles: mockFetchCandles
+            });
+
+            const firstMidpoint = result.chartData.find(point =>
+                point.timestamp / 1000 > rangeStart + 3600 &&
+                point.timestamp / 1000 < rangeStart + 43200
+            );
+
+            expect(firstMidpoint.value).toBeGreaterThan(100);
+            expect(firstMidpoint.value).toBeLessThan(200);
+        });
     });
 
     describe('1W View', () => {
