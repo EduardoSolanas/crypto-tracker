@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
 
 // Mock dependencies
@@ -71,6 +71,14 @@ jest.mock('../../utils/portfolioHistory', () => ({
         coinDeltas: {},
     }),
 }));
+
+jest.mock('../../components/CryptoGraph', () => {
+    const React = require('react');
+    const { View } = require('react-native');
+    return function MockCryptoGraph() {
+        return <View testID="crypto-graph" />;
+    };
+});
 
 jest.mock('../../components/CoinIcon', () => {
     const React = require('react');
@@ -287,6 +295,34 @@ describe('HomeScreen graph ranges', () => {
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: 'ALL' }));
+        });
+    });
+
+    it('keeps the boot screen visible until the default 1D graph finishes loading', async () => {
+        const history = require('../../utils/portfolioHistory');
+        let resolveHistory;
+        history.computePortfolioHistory.mockImplementation(() => new Promise((resolve) => {
+            resolveHistory = resolve;
+        }));
+
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
+        });
+        expect(queryByText('BTC')).toBeNull();
+
+        await act(async () => {
+            resolveHistory({
+                chartData: [{ timestamp: Date.now(), value: 50000 }],
+                delta: { val: 0, pct: 0 },
+                chartColor: '#22c55e',
+                coinDeltas: {},
+            });
+        });
+
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
         });
     });
 });

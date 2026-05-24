@@ -7,6 +7,7 @@ module.exports = {
     moduleNameMapper: {
         'react-native-wagmi-charts': '<rootDir>/src/__mocks__/react-native-wagmi-charts',
         'react-native-chart-kit': '<rootDir>/src/__mocks__/react-native-chart-kit',
+        'd3-shape': '<rootDir>/src/__mocks__/d3-shape',
     },
     transformIgnorePatterns: [
         'node_modules/(?!(jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|react-navigation|@react-navigation/.*|react-native-wagmi-charts|react-native-chart-kit|react-native-reanimated|react-native-worklets)'

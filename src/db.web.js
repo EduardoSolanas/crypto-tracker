@@ -36,7 +36,11 @@ export async function clearAllData() {
     debugLog('[DB][web] clearAllData');
     mem.holdings = {};
     mem.transactions = [];
-    mem.meta.delete('cache');
+    mem.meta.delete('cached_portfolio');
+    mem.meta.delete('cached_chart_data');
+    mem.meta.delete('cached_delta');
+    mem.meta.delete('cached_range');
+    mem.meta.delete('cached_custom_ts');
 }
 
 /* ---------------- TRANSACTIONS ---------------- */
@@ -120,4 +124,41 @@ export async function syncAllHoldingsFromTransactions() {
     }));
     mem.holdings = computeHoldingsFromTxns(normalized);
     return { ...mem.holdings };
+}
+
+/* ---------------- CACHE ---------------- */
+
+export async function saveCache(p, cData, d, r) {
+    try {
+        await setMeta('cached_portfolio', JSON.stringify(p));
+        await setMeta('cached_chart_data', JSON.stringify(cData));
+        await setMeta('cached_delta', JSON.stringify(d));
+        await setMeta('cached_range', r);
+        await setMeta('cached_custom_ts', Date.now().toString());
+    } catch (e) {
+        console.error('[DB][web] saveCache Error', e);
+    }
+}
+
+export async function loadCache() {
+    try {
+        const pStr = await getMeta('cached_portfolio');
+        const cStr = await getMeta('cached_chart_data');
+        const dStr = await getMeta('cached_delta');
+        const rStr = await getMeta('cached_range');
+        const tsStr = await getMeta('cached_custom_ts');
+
+        if (pStr && cStr) {
+            return {
+                portfolio: JSON.parse(pStr),
+                chartData: JSON.parse(cStr),
+                delta: dStr ? JSON.parse(dStr) : { val: 0, pct: 0 },
+                range: rStr || '1D',
+                timestamp: tsStr ? Number(tsStr) : 0
+            };
+        }
+    } catch (e) {
+        console.error('[DB][web] loadCache Error', e);
+    }
+    return null;
 }

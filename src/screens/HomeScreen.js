@@ -54,6 +54,7 @@ export default function HomeScreen() {
     const [chartColor, setChartColor] = useState('#22c55e');
     const [delta, setDelta] = useState({ val: 0, pct: 0 });
     const didBootstrapRef = useRef(false);
+    const suppressNextHistoryEffectRef = useRef(false);
 
     const totalValue = useMemo(
         () => (portfolio ? portfolio.reduce((acc, c) => acc + c.value, 0) : 0),
@@ -166,6 +167,10 @@ export default function HomeScreen() {
     // Recompute graph whenever range/currency/portfolio changes.
     useEffect(() => {
         if (!portfolio) return;
+        if (suppressNextHistoryEffectRef.current) {
+            suppressNextHistoryEffectRef.current = false;
+            return;
+        }
         getAllTransactions().then((txs) => {
             computeHistory(txs, portfolio, currency, range);
         });
@@ -188,13 +193,15 @@ export default function HomeScreen() {
                 const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp);
 
                 const allTxns = await getAllTransactions();
+                await computeHistory(allTxns, p, savedCurrency || currency, '1D');
+                suppressNextHistoryEffectRef.current = true;
                 setPortfolio(p);
-                computeHistory(allTxns, p, savedCurrency || currency, '1D');
             } catch (e) {
                 // If API fails, try to load cache (even if stale)
                 const loaded = await loadCache();
 
                 if (loaded) {
+                    suppressNextHistoryEffectRef.current = true;
                     setPortfolio(loaded.portfolio);
                     setChartData(loaded.chartData);
                     setDelta(loaded.delta);
@@ -253,6 +260,7 @@ export default function HomeScreen() {
 
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
+            suppressNextHistoryEffectRef.current = true;
             setPortfolio(p);
             computeHistory(allTxns, p, currency, range);
 
@@ -273,11 +281,13 @@ export default function HomeScreen() {
             const holdings = await getEffectiveHoldings();
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
+            suppressNextHistoryEffectRef.current = true;
             setPortfolio(p);
             computeHistory(allTxns, p, currency, range);
         } catch (e) {
             const cached = await loadCache();
             if (cached) {
+                suppressNextHistoryEffectRef.current = true;
                 setPortfolio(cached.portfolio);
                 setChartData(cached.chartData);
                 setDelta(cached.delta);

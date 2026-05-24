@@ -1,5 +1,6 @@
 import { Dimensions, Text, View } from 'react-native';
 import { CandlestickChart, LineChart } from 'react-native-wagmi-charts';
+import { curveMonotoneX } from 'd3-shape';
 import { downsampleCandleData, downsampleLineData } from '../utils/chartSampling';
 import { useTheme } from '../utils/theme';
 
@@ -58,7 +59,7 @@ export default function CryptoGraph({
                 <View style={{ width: chartWidth, position: 'relative' }}>
                     <GridLines />
                     <LineChart.Provider data={sampledData}>
-                        <LineChart width={chartWidth} height={height}>
+                        <LineChart width={chartWidth} height={height} shape={curveMonotoneX}>
                             <LineChart.Path color={color} width={2.5} />
                         </LineChart>
                     </LineChart.Provider>

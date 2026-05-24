@@ -1,4 +1,9 @@
 import { render } from '@testing-library/react-native';
+import { curveMonotoneX } from 'd3-shape';
+
+jest.mock('d3-shape', () => ({
+    curveMonotoneX: jest.fn(),
+}));
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
@@ -8,8 +13,8 @@ jest.mock('react-native-wagmi-charts', () => {
         React.createElement(View, { ...props, pointerEvents }, children);
     const MockText = ({ style, children }) => React.createElement(Text, { style }, children);
 
-    function LineChartComponent({ children }) {
-        return React.createElement(View, { testID: 'line-chart' }, children);
+    function LineChartComponent({ children, ...props }) {
+        return React.createElement(View, { testID: 'line-chart', ...props }, children);
     }
     LineChartComponent.Provider = MockView;
     LineChartComponent.Path = () => null;
@@ -102,6 +107,20 @@ describe('CryptoGraph', () => {
 
             expect(queryAllByTestId('graph-y-max')).toHaveLength(1);
             expect(queryAllByTestId('graph-y-min')).toHaveLength(1);
+        });
+
+        it('line chart uses monotone interpolation instead of the default bump curve', () => {
+            const mockData = [
+                { timestamp: Date.now() - 86400000, value: 50000 },
+                { timestamp: Date.now() - 43200000, value: 51000 },
+                { timestamp: Date.now(), value: 52000 }
+            ];
+
+            const { getByTestId } = render(
+                <CryptoGraph type="line" data={mockData} currency="USD" />
+            );
+
+            expect(getByTestId('line-chart').props.shape).toBe(curveMonotoneX);
         });
 
         it('candlestick chart has pointerEvents="none" to disable touch interactions', () => {
