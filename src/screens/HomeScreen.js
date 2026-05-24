@@ -265,7 +265,8 @@ export default function HomeScreen() {
                     cached.portfolio.filter(item => Object.keys(holdingsMap).includes(item.symbol)) : null;
 
                 const nextPortfolio = await smartFetchPortfolio(holdingsMap, filteredCachedPortfolio, cached?.timestamp);
-                safeSetState(setPortfolio, nextPortfolio);
+                const txs = await getAllTransactions();
+                allTxnsRef.current = txs;
 
                 if (cached?.chartData && cached?.range === range) {
                     safeSetState(setChartData, cached.chartData);
@@ -273,10 +274,11 @@ export default function HomeScreen() {
                     // History came from cache — still skip the effect's first run
                     skipNextHistoryRef.current = true;
                 } else {
-                    await refreshData(range);
-                    // refreshData already computed history — skip the effect's first run
+                    await computeHistory(txs, nextPortfolio, currentCurrency || currency, range);
+                    // Bootstrap already computed history — skip the effect's first run
                     skipNextHistoryRef.current = true;
                 }
+                safeSetState(setPortfolio, nextPortfolio);
             } catch (e) {
                 debugLog('Bootstrap error:', e);
             } finally {
@@ -285,7 +287,7 @@ export default function HomeScreen() {
         }
 
         bootstrap();
-    }, [range, refreshData, getEffectiveHoldings, smartFetchPortfolio, safeSetState]);
+    }, [range, computeHistory, currency, getEffectiveHoldings, smartFetchPortfolio, safeSetState]);
 
     const pickAndImportCsv = async () => {
         let result;

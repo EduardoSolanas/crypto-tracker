@@ -3,6 +3,8 @@ import {
     deleteTransaction,
     getAllTransactions,
     getHoldingsMap,
+    loadCache,
+    saveCache,
     getTransactionById,
     insertTransactions,
     syncAllHoldingsFromTransactions,
@@ -56,5 +58,22 @@ describe('db.web holdings sync invariants', () => {
 
         const holdings = await getHoldingsMap();
         expect(holdings.SOL).toBeUndefined();
+    });
+
+    it('persists and loads cached portfolio graph data', async () => {
+        const portfolio = [{ symbol: 'BTC', quantity: 1, price: 50000, value: 50000 }];
+        const chartData = [{ timestamp: 1700000000000, value: 50000 }];
+        const delta = { val: 1000, pct: 2 };
+
+        await saveCache(portfolio, chartData, delta, '1D');
+
+        const loaded = await loadCache();
+        expect(loaded).toEqual(expect.objectContaining({
+            portfolio,
+            chartData,
+            delta,
+            range: '1D',
+        }));
+        expect(loaded.timestamp).toEqual(expect.any(Number));
     });
 });

@@ -36,7 +36,11 @@ export async function clearAllData() {
     debugLog('[DB][web] clearAllData');
     mem.holdings = {};
     mem.transactions = [];
-    mem.meta.delete('cache');
+    mem.meta.delete('cached_portfolio');
+    mem.meta.delete('cached_chart_data');
+    mem.meta.delete('cached_delta');
+    mem.meta.delete('cached_range');
+    mem.meta.delete('cached_custom_ts');
 }
 
 /* ---------------- TRANSACTIONS ---------------- */

@@ -1,7 +1,7 @@
 /* global afterAll */
 
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
 
 jest.mock('expo-router', () => ({
@@ -262,6 +262,34 @@ describe('HomeScreen', () => {
                 expect.objectContaining({ range: '1H' })
             );
             expect(getByTestId('mock-graph-range').props.children).toBe('1H');
+        });
+    });
+
+    it('keeps the boot screen visible until the default 1D graph finishes loading', async () => {
+        const history = require('../../utils/portfolioHistory');
+        let resolveHistory;
+        history.computePortfolioHistory.mockImplementation(() => new Promise((resolve) => {
+            resolveHistory = resolve;
+        }));
+
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
+        });
+        expect(queryByText('BTC')).toBeNull();
+
+        await act(async () => {
+            resolveHistory({
+                chartData: [{ timestamp: Date.now(), value: 50000 }],
+                delta: { val: 0, pct: 0 },
+                chartColor: '#22c55e',
+                coinDeltas: {},
+            });
+        });
+
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
         });
     });
 });
