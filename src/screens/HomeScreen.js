@@ -21,7 +21,7 @@ import CryptoGraph from '../components/CryptoGraph';
 import { fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
 import { computeHoldingsFromTxns, parseDeltaCsvWithReport } from '../csv';
 import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, loadCache, saveCache } from '../db';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatQuantity } from '../utils/format';
 import { computePortfolioHistory } from '../utils/portfolioHistory';
 import { useTheme } from '../utils/theme';
 
@@ -472,7 +472,7 @@ export default function HomeScreen() {
                                     <View>
                                         <Text style={styles.coinSymbol}>{item.symbol}</Text>
                                         <Text style={styles.coinPrice}>
-                                            {item.quantity.toFixed(0)} | {formatMoney(item.price, currency)}
+                                            {formatQuantity(item.quantity)} | {formatMoney(item.price, currency)}
                                         </Text>
                                     </View>
                                 </View>

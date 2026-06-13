@@ -20,6 +20,21 @@ export const formatMoney = (val, cur = 'EUR') => {
 };
 
 /**
+ * Formats a coin quantity with sensible precision.
+ * Large holdings (>= 1) show up to 2 decimals; fractional holdings keep
+ * up to 4 significant digits so small balances are not truncated to "0".
+ * Trailing zeros are trimmed.
+ * @param {number|string} val The quantity to format.
+ * @returns {string} Formatted quantity string.
+ */
+export const formatQuantity = (val) => {
+    const v = Number(val || 0);
+    if (!Number.isFinite(v) || v === 0) return '0';
+    const rounded = Math.abs(v) >= 1 ? Number(v.toFixed(2)) : Number(v.toPrecision(4));
+    return String(rounded);
+};
+
+/**
  * Formats a number with locale-aware separators.
  * @param {number|string} val The value to format.
  * @param {number} decimals Number of decimal places.
