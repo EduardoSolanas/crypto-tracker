@@ -15,7 +15,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getMeta, getTransactionById, initDb, insertTransactions, syncHoldingsForSymbol, updateTransaction } from '../src/db';
+import { getMeta, getTransactionById, initDb, insertTransactions, updateTransaction } from '../src/db';
 import { useTheme } from '../src/utils/theme';
 
 function dateInputToUtcIso(dateInput) {
@@ -25,7 +25,14 @@ function dateInputToUtcIso(dateInput) {
         const year = Number(dateOnly[1]);
         const month = Number(dateOnly[2]);
         const day = Number(dateOnly[3]);
-        return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).toISOString();
+        const date = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+        if (
+            date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 ||
+            date.getUTCDate() !== day
+        ) {
+            throw new Error('INVALID_DATE_FORMAT');
+        }
+        return date.toISOString();
     }
 
     const parsed = new Date(raw);
@@ -64,6 +71,7 @@ export default function AddTransactionScreen() {
                     setAmount(String(tx.amount));
                     setPrice(String(tx.quote_amount / tx.amount));
                     setDate(tx.date_iso.split('T')[0]);
+                    setCurrency(tx.quote_currency || c || 'EUR');
                 }
             }
         })();
@@ -77,11 +85,10 @@ export default function AddTransactionScreen() {
 
         setLoading(true);
         try {
-            const existingTx = txId ? await getTransactionById(txId) : null;
-            const qty = parseFloat(amount);
-            const p = parseFloat(price);
+            const qty = Number(amount);
+            const p = Number(price);
 
-            if (isNaN(qty) || isNaN(p)) {
+            if (!Number.isFinite(qty) || !Number.isFinite(p) || qty <= 0 || p <= 0) {
                 Alert.alert(t('addTransaction.invalidNumbersTitle'), t('addTransaction.invalidNumbersMessage'));
                 setLoading(false);
                 return;
@@ -102,11 +109,6 @@ export default function AddTransactionScreen() {
                 await updateTransaction(txId, newTx);
             } else {
                 await insertTransactions([newTx]);
-            }
-
-            await syncHoldingsForSymbol(newTx.symbol);
-            if (existingTx?.symbol && existingTx.symbol !== newTx.symbol) {
-                await syncHoldingsForSymbol(existingTx.symbol);
             }
 
             // Go back

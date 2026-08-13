@@ -11,6 +11,25 @@ const formatYLabel = (val, currency) => {
     return n.toLocaleString(undefined, { maximumFractionDigits: 0, style: 'currency', currency: currency || 'USD' });
 };
 
+function GridLines({ isDark }) {
+    return (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', paddingVertical: 10 }}>
+            {[0, 1].map((i) => (
+                <View
+                    key={i}
+                    style={{
+                        borderBottomWidth: 1,
+                        borderColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(15,23,42,0.30)',
+                        borderStyle: 'dotted',
+                        opacity: 1,
+                        width: '100%'
+                    }}
+                />
+            ))}
+        </View>
+    );
+}
+
 export default function CryptoGraph({
     type = 'line',
     data,
@@ -28,24 +47,6 @@ export default function CryptoGraph({
     const maxLinePoints = Math.max(40, Math.floor(chartWidth / 4));
     const maxCandlePoints = Math.max(40, Math.floor(chartWidth / 5));
 
-    // Horizontal Grid Lines Component
-    const GridLines = () => (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', paddingVertical: 10 }}>
-            {[0, 1].map((i) => (
-                <View
-                    key={i}
-                    style={{
-                        borderBottomWidth: 1,
-                        borderColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(15,23,42,0.30)',
-                        borderStyle: 'dotted',
-                        opacity: 1,
-                        width: '100%'
-                    }}
-                />
-            ))}
-        </View>
-    );
-
     // Line Chart (Portfolio) - No interactive elements
     if (type === 'line') {
         const sampledData = downsampleLineData(data, maxLinePoints);
@@ -56,7 +57,7 @@ export default function CryptoGraph({
         return (
             <View style={{ flexDirection: 'row', height }} pointerEvents="none">
                 <View style={{ width: chartWidth, position: 'relative' }}>
-                    <GridLines />
+                    <GridLines isDark={isDark} />
                     <LineChart.Provider data={sampledData}>
                         <LineChart width={chartWidth} height={height}>
                             <LineChart.Path color={color} width={2.5} />
@@ -85,7 +86,7 @@ export default function CryptoGraph({
             <View pointerEvents="none">
                 <View style={{ flexDirection: 'row', height }}>
                     <View style={{ width: chartWidth, position: 'relative' }}>
-                        <GridLines />
+                        <GridLines isDark={isDark} />
                         <CandlestickChart.Provider data={sampledData}>
                             <CandlestickChart width={chartWidth} height={height}>
                                 <CandlestickChart.Candles />

@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 import { fetchPortfolioPrices } from '../src/cryptoCompare';
 import { exportTransactionsToCSV, parseDeltaCsvWithReport } from '../src/csv';
-import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, setMeta } from '../src/db';
+import { clearCache, clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, replaceAllTransactions, setMeta } from '../src/db';
 import i18n, { getSystemLanguage } from '../src/i18n';
 import { getCurrencyOptions } from '../src/utils/currencies';
 import { SUPPORTED_LANGUAGES } from '../src/utils/languages';
@@ -42,10 +42,6 @@ export default function SettingsScreen() {
         );
     }, [currencyOptions, currencySearch]);
 
-    useEffect(() => {
-        loadSettings();
-    }, []);
-
     const loadSettings = async () => {
         try {
             await initDb();
@@ -67,10 +63,19 @@ export default function SettingsScreen() {
         }
     };
 
+    useEffect(() => {
+        let active = true;
+        queueMicrotask(() => {
+            if (active) loadSettings();
+        });
+        return () => { active = false; };
+    }, []);
+
     const handleSelectCurrency = async (code) => {
         try {
             setCurrency(code);
             await setMeta('currency', code);
+            await clearCache();
             setIsCurrencyModalVisible(false);
             setCurrencySearch('');
         } catch (_e) {
@@ -101,12 +106,12 @@ export default function SettingsScreen() {
             const asset = result.assets[0];
 
             try {
-                setImportProgress({ current: 0, total: 4, stage: tr('settings.readingCsv', 'Reading CSV file...') });
+                setImportProgress({ current: 0, total: 3, stage: tr('settings.readingCsv', 'Reading CSV file...') });
 
                 const response = await fetch(asset.uri);
                 const text = await response.text();
 
-                setImportProgress({ current: 1, total: 4, stage: tr('settings.parsingTransactions', 'Parsing transactions...') });
+                setImportProgress({ current: 1, total: 3, stage: tr('settings.parsingTransactions', 'Parsing transactions...') });
                 const { txns, report } = parseDeltaCsvWithReport(text);
                 if (!txns.length) {
                     setImportProgress(null);
@@ -128,14 +133,11 @@ export default function SettingsScreen() {
                             style: 'destructive',
                             onPress: async () => {
                                 try {
-                                    setImportProgress({ current: 2, total: 4, stage: tr('settings.clearingOldData', 'Clearing old data...') });
-                                    await clearAllData();
-
-                                    setImportProgress({ current: 3, total: 4, stage: tr('settings.savingTransactions', `Saving ${txns.length} transactions...`, { count: txns.length }) });
-                                    await insertTransactions(txns);
+                                    setImportProgress({ current: 2, total: 3, stage: tr('settings.savingTransactions', `Saving ${txns.length} transactions...`, { count: txns.length }) });
+                                    await replaceAllTransactions(txns);
                                     const holdings = await getHoldingsMap();
 
-                                    setImportProgress({ current: 4, total: 4, stage: tr('settings.fetchingLatestPrices', 'Fetching latest prices...') });
+                                    setImportProgress({ current: 3, total: 3, stage: tr('settings.fetchingLatestPrices', 'Fetching latest prices...') });
                                     const currentCurrency = await getMeta('currency') || currency;
                                     await fetchPortfolioPrices(holdings, currentCurrency);
 

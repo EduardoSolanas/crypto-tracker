@@ -125,4 +125,25 @@ describe('CoinScreen graph ranges', () => {
             expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'minute', 120, 12);
         });
     });
+
+    it('keeps fractional holdings visible in the owned summary', async () => {
+        const cryptoCompare = require('../../cryptoCompare');
+        const db = require('../../db');
+        mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
+        db.getHoldingsMap.mockResolvedValue({ BTC: 0.001234 });
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValueOnce([{
+            symbol: 'BTC',
+            quantity: 0.001234,
+            price: 50000,
+            value: 61.7,
+            change24h: 2.5,
+            imageUrl: null,
+        }]);
+
+        const { getByText } = render(<CoinScreen />);
+
+        await waitFor(() => {
+            expect(getByText('0.001234')).toBeTruthy();
+        });
+    });
 });

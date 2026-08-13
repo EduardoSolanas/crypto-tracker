@@ -17,7 +17,7 @@ import CoinIcon from '../components/CoinIcon';
 import CryptoGraph from '../components/CryptoGraph';
 import { fetchCandles, fetchFxRates, fetchPortfolioPrices } from '../cryptoCompare';
 import { getHoldingsMap, getMeta, listTransactionsBySymbol } from '../db';
-import { formatMoney, formatNumber } from '../utils/format';
+import { formatMoney, formatNumber, formatQuantity } from '../utils/format';
 import { mapCandlesToPoints } from '../utils/chartContracts';
 import { COIN_CHART_RANGES, getCoinChartFetchParams } from '../utils/coinChartRange';
 import { computeCoinTransactionStats } from '../utils/transactionCalculations';
@@ -283,7 +283,7 @@ export default function CoinScreen() {
                     <View style={styles.statsRow}>
                         <View>
                             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{formatNumber(coin?.quantity || 0, 2)}</Text>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{formatQuantity(coin?.quantity || 0)}</Text>
                         </View>
                         <View>
                             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>

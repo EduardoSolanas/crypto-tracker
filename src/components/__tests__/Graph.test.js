@@ -35,7 +35,6 @@ describe('Graph (Legacy)', () => {
             );
 
             // Simulate data point click which sets hoverValue
-            const chart = getByText('Current Value').parent.parent;
             // Note: In real scenario, LineChart's onDataPointClick would be triggered
             // For now, we verify the label exists
             expect(getByText('Current Value')).toBeTruthy();

@@ -1,4 +1,6 @@
 import { render } from '@testing-library/react-native';
+import CryptoGraph from '../CryptoGraph.js';
+import WebCryptoGraph from '../CryptoGraph.web';
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
@@ -6,7 +8,6 @@ jest.mock('react-native-wagmi-charts', () => {
 
     const MockView = ({ children, pointerEvents, ...props }) => 
         React.createElement(View, { ...props, pointerEvents }, children);
-    const MockText = ({ style, children }) => React.createElement(Text, { style }, children);
 
     function LineChartComponent({ children }) {
         return React.createElement(View, { testID: 'line-chart' }, children);
@@ -30,8 +31,6 @@ jest.mock('react-native-wagmi-charts', () => {
         CandlestickChart: CandlestickChartComponent,
     };
 });
-
-import CryptoGraph from '../CryptoGraph';
 
 describe('CryptoGraph', () => {
     describe('Basic Rendering', () => {
@@ -207,7 +206,7 @@ describe('CryptoGraph', () => {
                     value: 30000 + Math.sin(i / 4) * 2000 // Wave pattern
                 }));
 
-                const { getByText, getByTestId } = render(
+                const { getByTestId } = render(
                     <CryptoGraph type="line" data={mockData} currency="GBP" />
                 );
 
@@ -558,5 +557,24 @@ describe('CryptoGraph', () => {
             expect(getByText(/£47,000/)).toBeTruthy(); // Highest
             expect(getByText(/£44,500/)).toBeTruthy(); // Lowest
         });
+    });
+});
+
+describe('CryptoGraph web fallback', () => {
+    it('renders a non-native chart fallback with the same axis labels', () => {
+        const { getByTestId, getAllByTestId } = render(
+            <WebCryptoGraph
+                type="line"
+                currency="USD"
+                data={[
+                    { timestamp: 1, value: 50000 },
+                    { timestamp: 2, value: 52000 },
+                ]}
+            />
+        );
+
+        expect(getByTestId('web-chart-fallback')).toBeTruthy();
+        expect(getAllByTestId('graph-y-max')).toHaveLength(1);
+        expect(getAllByTestId('graph-y-min')).toHaveLength(1);
     });
 });

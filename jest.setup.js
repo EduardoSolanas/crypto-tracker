@@ -9,17 +9,6 @@ jest.mock('react-native-reanimated', () => {
     return Reanimated;
 });
 
-// Silence the warning: Animated: `useNativeDriver` is not supported because the native animated module is missing
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({
-    __esModule: true,
-    default: {
-        API: {
-            setHasNativeAnimatedModel: jest.fn(),
-            setNativeProps: jest.fn(),
-        },
-    },
-}), { virtual: true });
-
 // Mock Dimensions
 import { Dimensions } from 'react-native';
 jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 375, height: 812 });

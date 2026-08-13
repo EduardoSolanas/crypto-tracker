@@ -20,7 +20,7 @@ import CoinIcon from '../components/CoinIcon';
 import CryptoGraph from '../components/CryptoGraph';
 import { fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
 import { computeHoldingsFromTxns, parseDeltaCsvWithReport } from '../csv';
-import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, loadCache, saveCache } from '../db';
+import { getAllTransactions, getHoldingsMap, getMeta, initDb, loadCache, replaceAllTransactions, saveCache } from '../db';
 import { formatMoney, formatQuantity } from '../utils/format';
 import { computePortfolioHistory } from '../utils/portfolioHistory';
 import { useTheme } from '../utils/theme';
@@ -53,6 +53,7 @@ export default function HomeScreen() {
     const [graphError, setGraphError] = useState('');
     const [chartColor, setChartColor] = useState('#22c55e');
     const [delta, setDelta] = useState({ val: 0, pct: 0 });
+    const [coinDeltas, setCoinDeltas] = useState({});
     const didBootstrapRef = useRef(false);
 
     const totalValue = useMemo(
@@ -76,7 +77,7 @@ export default function HomeScreen() {
 
 
     // Helper: Smart Fetch
-    const smartFetchPortfolio = useCallback(async (holdingsMap, cachedPortfolio, savedTimestamp) => {
+    const smartFetchPortfolio = useCallback(async (holdingsMap, cachedPortfolio, savedTimestamp, selectedCurrency) => {
         const now = Date.now();
         const symbols = Object.keys(holdingsMap);
         const toFetch = [];
@@ -125,13 +126,13 @@ export default function HomeScreen() {
         const subsetMap = {};
         toFetch.forEach(s => subsetMap[s] = holdingsMap[s]);
 
-        const newItems = await fetchPortfolioPrices(subsetMap, currency);
+        const newItems = await fetchPortfolioPrices(subsetMap, selectedCurrency);
 
         // Merge
         const merged = [...kept, ...newItems];
         merged.sort((a, b) => b.value - a.value);
         return merged;
-    }, [currency]);
+    }, []);
 
     // Compute History with dynamic range support
     const computeHistory = useCallback(async (allTxns, currentPortfolio, selectedCurrency, selectedRange) => {
@@ -153,7 +154,7 @@ export default function HomeScreen() {
             setCoinDeltas(coinDeltas);
 
             if (currentPortfolio?.length) {
-                saveCache(currentPortfolio, chartData, delta, selectedRange);
+                saveCache(currentPortfolio, chartData, delta, selectedRange, selectedCurrency);
             }
 
         } catch (e) {
@@ -175,24 +176,26 @@ export default function HomeScreen() {
         if (didBootstrapRef.current) return;
         didBootstrapRef.current = true;
         (async () => {
+            let selectedCurrency = 'EUR';
             try {
                 await initDb();
                 const savedCurrency = await getMeta('currency');
-                if (savedCurrency) setCurrency(savedCurrency);
+                selectedCurrency = savedCurrency || 'EUR';
+                setCurrency(selectedCurrency);
 
                 const holdings = await getEffectiveHoldings();
-                const cached = await loadCache();
+                const cached = await loadCache(selectedCurrency);
 
                 // Boot: Try smart fetch (which respects timeouts)
                 // If smartFetch returns, it handles cache logic internally (returns stored items if fresh)
-                const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp);
+                const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
 
                 const allTxns = await getAllTransactions();
                 setPortfolio(p);
-                computeHistory(allTxns, p, savedCurrency || currency, '1D');
+                computeHistory(allTxns, p, selectedCurrency, '1D');
             } catch (e) {
                 // If API fails, try to load cache (even if stale)
-                const loaded = await loadCache();
+                const loaded = await loadCache(selectedCurrency);
 
                 if (loaded) {
                     setPortfolio(loaded.portfolio);
@@ -213,7 +216,7 @@ export default function HomeScreen() {
                 setBooting(false);
             }
         })();
-    }, [computeHistory, currency, getEffectiveHoldings, smartFetchPortfolio, tr]);
+    }, [computeHistory, getEffectiveHoldings, smartFetchPortfolio, tr]);
 
     const pickAndImportCsv = async () => {
         let result;
@@ -247,8 +250,7 @@ export default function HomeScreen() {
                 return;
             }
 
-            await clearAllData();
-            await insertTransactions(txns);
+            await replaceAllTransactions(txns);
             const holdings = await getHoldingsMap();
 
             const p = await fetchPortfolioPrices(holdings, currency);
@@ -276,7 +278,7 @@ export default function HomeScreen() {
             setPortfolio(p);
             computeHistory(allTxns, p, currency, range);
         } catch (e) {
-            const cached = await loadCache();
+            const cached = await loadCache(currency);
             if (cached) {
                 setPortfolio(cached.portfolio);
                 setChartData(cached.chartData);
@@ -289,8 +291,6 @@ export default function HomeScreen() {
             setLoading(false);
         }
     };
-
-    const [coinDeltas, setCoinDeltas] = useState({});
 
     const [showSmallBalances, setShowSmallBalances] = useState(false);
 

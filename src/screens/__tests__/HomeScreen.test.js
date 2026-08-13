@@ -26,8 +26,7 @@ jest.mock('../../db', () => ({
     getMeta: jest.fn().mockResolvedValue('EUR'),
     loadCache: jest.fn().mockResolvedValue(null),
     saveCache: jest.fn().mockResolvedValue(undefined),
-    clearAllData: jest.fn().mockResolvedValue(undefined),
-    insertTransactions: jest.fn().mockResolvedValue(undefined),
+    replaceAllTransactions: jest.fn().mockResolvedValue(undefined),
     upsertHoldings: jest.fn().mockResolvedValue(undefined),
     setMeta: jest.fn().mockResolvedValue(undefined),
 }));
@@ -129,7 +128,7 @@ describe('HomeScreen - Small Balances Toggle', () => {
     });
 
     it('should show all balances when toggle is clicked', async () => {
-        const { getByText, queryByText } = render(<HomeScreen />);
+        const { getByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
@@ -287,6 +286,23 @@ describe('HomeScreen graph ranges', () => {
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: 'ALL' }));
+        });
+    });
+});
+
+describe('HomeScreen saved currency', () => {
+    it('uses the saved currency for its first price fetch', async () => {
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+        db.getMeta.mockResolvedValue('USD');
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
+        db.getAllTransactions.mockResolvedValue([]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([]);
+
+        render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(cryptoCompare.fetchPortfolioPrices).toHaveBeenCalledWith({ BTC: 1 }, 'USD');
         });
     });
 });

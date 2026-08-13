@@ -39,7 +39,7 @@ jest.mock('../../../src/db', () => ({
     getMeta: jest.fn().mockResolvedValue('EUR'),
     setMeta: jest.fn().mockResolvedValue(undefined),
     clearAllData: jest.fn().mockResolvedValue(undefined),
-    insertTransactions: jest.fn().mockResolvedValue(undefined),
+    replaceAllTransactions: jest.fn().mockResolvedValue(undefined),
     getHoldingsMap: jest.fn().mockResolvedValue({ BTC: 1, ETH: 10 }),
 }));
 
@@ -190,11 +190,11 @@ describe('SettingsScreen - Import Progress', () => {
 
         // Verify progress stages
         await waitFor(() => {
-            expect(db.clearAllData).toHaveBeenCalled();
+            expect(db.replaceAllTransactions).toHaveBeenCalledWith(mockTransactions);
         });
 
         await waitFor(() => {
-            expect(db.insertTransactions).toHaveBeenCalledWith(mockTransactions);
+            expect(db.replaceAllTransactions).toHaveBeenCalledWith(mockTransactions);
         });
     });
 
@@ -260,7 +260,7 @@ describe('SettingsScreen - Import Progress', () => {
     });
 
     it('should show progress bar with correct percentage', async () => {
-        const { getByText, UNSAFE_getByProps } = render(<SettingsScreen />);
+        const { getByText } = render(<SettingsScreen />);
 
         await waitFor(() => {
             expect(getByText('Import CSV')).toBeTruthy();
@@ -336,7 +336,7 @@ describe('SettingsScreen - Import Progress', () => {
 
     it('should handle import errors gracefully', async () => {
         const db = require('../../../src/db');
-        db.insertTransactions.mockRejectedValueOnce(new Error('Database error'));
+        db.replaceAllTransactions.mockRejectedValueOnce(new Error('Database error'));
 
         const { getByText } = render(<SettingsScreen />);
 
@@ -362,7 +362,7 @@ describe('SettingsScreen - Import Progress', () => {
         });
     });
 
-    it('should clear old data before importing new transactions', async () => {
+    it('should replace old data atomically when importing transactions', async () => {
         const db = require('../../../src/db');
         const { getByText } = render(<SettingsScreen />);
 
@@ -381,13 +381,8 @@ describe('SettingsScreen - Import Progress', () => {
         await importAction.onPress();
 
         await waitFor(() => {
-            expect(db.clearAllData).toHaveBeenCalled();
+            expect(db.replaceAllTransactions).toHaveBeenCalledWith(mockTransactions);
         });
-
-        // Ensure clearAllData is called before insertTransactions
-        const clearIndex = db.clearAllData.mock.invocationCallOrder[0];
-        const insertIndex = db.insertTransactions.mock.invocationCallOrder[0];
-        expect(clearIndex).toBeLessThan(insertIndex);
     });
 });
 
@@ -499,10 +494,6 @@ describe('SettingsScreen - Reset Data', () => {
 
         fireEvent.press(getByText('Reset All Data'));
 
-        // Click cancel
-        const alertCall = Alert.alert.mock.calls[0];
-        const cancelAction = alertCall[2].find(btn => btn.text === 'Cancel');
-        
         // Cancel doesn't have onPress by default in Alert.alert cancel style
         // Just verify clearAllData wasn't called yet
         expect(db.clearAllData).not.toHaveBeenCalled();
