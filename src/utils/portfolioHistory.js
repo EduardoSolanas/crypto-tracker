@@ -127,7 +127,9 @@ export const computePortfolioHistory = async ({
         const ts = gridNow - (i * simStep);
         if (ts <= nowSec) timePoints.push(ts);
     }
-    if (nowSec - timePoints[timePoints.length - 1] > 1) timePoints.push(nowSec);
+    if (timePoints.length === 0 || nowSec > timePoints[timePoints.length - 1]) {
+        timePoints.push(nowSec);
+    }
 
     // --- 2. FETCH HISTORY ---
     const historyMap = {};

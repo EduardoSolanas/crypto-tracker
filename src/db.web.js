@@ -131,6 +131,10 @@ export async function syncHoldingsForSymbol(symbol) {
 }
 
 export async function syncAllHoldingsFromTransactions() {
+    if (!mem.transactions || mem.transactions.length === 0) {
+        mem.holdings = {};
+        return {};
+    }
     const normalized = mem.transactions.map((t) => ({
         symbol: t.symbol,
         amount: Number(t.amount || 0),

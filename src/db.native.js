@@ -61,6 +61,12 @@ export async function initDb() {
     );
   `);
 
+    // Ensure holdings table is clean when transactions table is empty
+    const txCountRow = await db.getFirstAsync('SELECT COUNT(*) as count FROM transactions');
+    if ((txCountRow?.count ?? 0) === 0) {
+        await db.execAsync('DELETE FROM holdings;');
+    }
+
     debugLog('[DB][native] schema ready');
 }
 
@@ -300,6 +306,11 @@ export async function syncHoldingsForSymbol(symbol) {
 
 export async function syncAllHoldingsFromTransactions() {
     const allTxns = await getAllTransactions();
+    if (!allTxns || allTxns.length === 0) {
+        const db = await getDb();
+        await db.execAsync('DELETE FROM holdings;');
+        return {};
+    }
     const normalized = allTxns.map((t) => ({
         symbol: t.symbol,
         amount: Number(t.amount || 0),

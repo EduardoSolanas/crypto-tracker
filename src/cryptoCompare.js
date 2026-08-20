@@ -20,10 +20,11 @@ async function fetchCcPriceMultiFull(symbols, currency) {
 
     const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${fsyms.join(',')}&tsyms=${tsym}`;
     const res = await fetch(url);
+    if (!res.ok) throw new Error('CryptoCompare HTTP Error');
     const json = await res.json();
 
-    if (json?.Response === 'Error') {
-        throw new Error(json.Message || 'API Error');
+    if (json?.Response === 'Error' || json?.Err) {
+        throw new Error(json?.Message || json?.Err?.message || 'API Error');
     }
 
     return json?.RAW || {};
@@ -73,59 +74,107 @@ function mapCcQuoteToPortfolioRow(sym, d, quantity) {
     };
 }
 
-// --- FALLBACK: BINANCE ---
+// --- MULTI-EXCHANGE PRICING (Binance / Coinbase / Gate.io) ---
 async function fetchBinancePrices(holdingsMap, currency) {
-    debugLog('[API] Using Binance Fallback');
+    debugLog('[API] Using Multi-Exchange Pricing');
     const symbols = Object.keys(holdingsMap);
+    const target = String(currency || 'EUR').toUpperCase();
     const portfolio = [];
 
-    // Binance doesn't have a multi-symbol endpoint like CC, so we fetch in parallel
-    // (Rate limit for Binance is very high, 1200/min usually safe)
-    await Promise.all(symbols.map(async (sym) => {
+    let usdtToTarget = 1;
+    if (target !== 'USD') {
         try {
-            // MAPPING: USDT is a common base if EUR fails, but let's try CURRENCY first.
-            // Binance symbols are usually Uppercase e.g. BTCEUR
-            let pair = `${sym}${currency}`.toUpperCase();
-
-            // Special handling for common infinite stablecoins or small caps if needed
-            // For now assume standard pairs
-
-            const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`);
-            if (!res.ok) {
-                // Try USDT intermediate if EUR fails? 
-                // For now just skip or return 0
-                // console.warn(`[Binance] No pair for ${pair}`);
-                // return;
-                throw new Error(`No pair ${pair}`);
+            const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${target}USDT`);
+            if (r.ok) {
+                const j = await r.json();
+                const rate = parseFloat(j.price);
+                if (rate > 0) usdtToTarget = 1 / rate;
             }
-
-            const json = await res.json();
-            const quantity = holdingsMap[sym] ?? 0;
-            const price = parseFloat(json.lastPrice);
-
-            portfolio.push({
-                symbol: sym,
-                quantity,
-                price,
-                value: quantity * price,
-                change24h: parseFloat(json.priceChangePercent),
-                high24h: parseFloat(json.highPrice),
-                low24h: parseFloat(json.lowPrice),
-                mktCap: 0, // Binance ticker doesn't return mkt cap
-                vol24h: parseFloat(json.volume), // This is base volume
-                imageUrl: null // Will use fallback in CoinIcon component
-            });
-
-        } catch (e) {
-            console.warn(`[Binance] Error fetching ${sym}:`, e.message);
-            // Return fallback/empty entry so we don't crash
-            portfolio.push({
-                symbol: sym,
-                quantity: holdingsMap[sym],
-                price: 0, value: 0, change24h: 0, high24h: 0, low24h: 0, mktCap: 0, vol24h: 0,
-                imageUrl: null
-            });
+        } catch (_e) {
+            const fx = await fetchUsdToTargetRate(target);
+            if (fx > 0) usdtToTarget = fx;
         }
+    }
+
+    await Promise.all(symbols.map(async (sym) => {
+        const quantity = holdingsMap[sym] ?? 0;
+        let price = 0;
+        let change24h = 0;
+        let high24h = 0;
+        let low24h = 0;
+        let vol24h = 0;
+
+        // 1. Binance direct pair
+        try {
+            const resDirect = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}${target}`);
+            if (resDirect.ok) {
+                const j = await resDirect.json();
+                price = parseFloat(j.lastPrice);
+                change24h = parseFloat(j.priceChangePercent);
+                high24h = parseFloat(j.highPrice);
+                low24h = parseFloat(j.lowPrice);
+                vol24h = parseFloat(j.volume);
+            } else {
+                // 2. Binance USDT pair
+                const resUsdt = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
+                if (resUsdt.ok) {
+                    const j = await resUsdt.json();
+                    price = parseFloat(j.lastPrice) * usdtToTarget;
+                    change24h = parseFloat(j.priceChangePercent);
+                    high24h = parseFloat(j.highPrice) * usdtToTarget;
+                    low24h = parseFloat(j.lowPrice) * usdtToTarget;
+                    vol24h = parseFloat(j.volume);
+                }
+            }
+        } catch (_e) {}
+
+        // 3. Coinbase spot price if not found
+        if (!price || price <= 0) {
+            try {
+                const cbRes = await fetch(`https://api.coinbase.com/v2/prices/${sym}-${target}/spot`);
+                if (cbRes.ok) {
+                    const cbJson = await cbRes.json();
+                    const p = parseFloat(cbJson?.data?.amount);
+                    if (p > 0) {
+                        price = p;
+                        high24h = p;
+                        low24h = p;
+                    }
+                }
+            } catch (_e) {}
+        }
+
+        // 4. Gate.io if not found
+        if (!price || price <= 0) {
+            try {
+                const gateRes = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${sym}_USDT`);
+                if (gateRes.ok) {
+                    const gateJson = await gateRes.json();
+                    if (gateJson?.[0]?.last) {
+                        const p = parseFloat(gateJson[0].last) * usdtToTarget;
+                        if (p > 0) {
+                            price = p;
+                            change24h = parseFloat(gateJson[0].change_percentage || 0);
+                            high24h = parseFloat(gateJson[0].high_24h || 0) * usdtToTarget;
+                            low24h = parseFloat(gateJson[0].low_24h || 0) * usdtToTarget;
+                        }
+                    }
+                }
+            } catch (_e) {}
+        }
+
+        portfolio.push({
+            symbol: sym,
+            quantity,
+            price: Number.isFinite(price) ? price : 0,
+            value: Number.isFinite(price) ? quantity * price : 0,
+            change24h: Number.isFinite(change24h) ? change24h : 0,
+            high24h: Number.isFinite(high24h) ? high24h : 0,
+            low24h: Number.isFinite(low24h) ? low24h : 0,
+            mktCap: 0,
+            vol24h: Number.isFinite(vol24h) ? vol24h : 0,
+            imageUrl: null,
+        });
     }));
 
     portfolio.sort((a, b) => b.value - a.value);
@@ -175,26 +224,19 @@ export async function fetchPortfolioPrices(holdingsMap, currency) {
                 };
             }
 
-            return {
-                symbol: sym,
-                quantity,
-                price: 0,
-                value: 0,
-                change24h: 0,
-                high24h: 0,
-                low24h: 0,
-                mktCap: 0,
-                vol24h: 0,
-                imageUrl: null
-            };
+            return null;
         });
+
+        // If any symbol failed to get a price or returned null, fall back to multi-exchange
+        if (portfolio.some(row => !row || row.price === 0)) {
+            return await fetchBinancePrices(holdingsMap, currency);
+        }
 
         portfolio.sort((a, b) => b.value - a.value);
         return portfolio;
 
     } catch (e) {
-        console.warn('[CryptoCompare] Primary pricing failed:', e?.message || e);
-        // Fallback to Binance
+        debugLog('[CryptoCompare] Primary pricing failed, falling back to multi-exchange:', e?.message || e);
         return await fetchBinancePrices(holdingsMap, currency);
     }
 }
@@ -231,64 +273,95 @@ export async function fetchFxRates(fromCurrencies, toCurrency) {
     return rateMap;
 }
 
-// --- FALLBACK HISTORY: BINANCE ---
+// --- HISTORICAL CANDLES ---
 async function fetchBinanceCandles(symbol, currency, timeframe, limit) {
     try {
         let interval = '1d';
         if (timeframe === 'hour') interval = '1h';
         if (timeframe === 'minute') interval = '1m';
 
-        // Binance limit max is 1000. If we need more (e.g. ALL=2000), we might need multiple calls or just cap it.
-        // For simplicity, cap at 1000 for fallback (better than nothing).
         const binanceLimit = Math.min(limit, 1000);
+        const target = String(currency || 'EUR').toUpperCase();
+        let pair = `${symbol}${target}`.toUpperCase();
+        let rate = 1;
 
-        let pair = `${symbol}${currency}`.toUpperCase();
-        const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${binanceLimit}`;
+        let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${binanceLimit}`);
+        if (!res.ok) {
+            const usdtPair = `${symbol}USDT`.toUpperCase();
+            res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${usdtPair}&interval=${interval}&limit=${binanceLimit}`);
+            if (!res.ok) throw new Error('Binance K-line failed');
 
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Binance K-line failed');
+            if (target !== 'USD') {
+                try {
+                    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${target}USDT`);
+                    if (r.ok) {
+                        const j = await r.json();
+                        const p = parseFloat(j.price);
+                        if (p > 0) rate = 1 / p;
+                    }
+                } catch (_e) {}
+            }
+        }
 
         const json = await res.json();
-        // Binance response: [ [OpenTime, Open, High, Low, Close, ...], ... ]
-        // CC format: { time: unix_seconds, close: number }
-
         return json.map(k => ({
-            time: Math.floor(k[0] / 1000), // ms to sec
-            close: parseFloat(k[4]),
-            high: parseFloat(k[2]),
-            low: parseFloat(k[3]),
-            open: parseFloat(k[1])
+            time: Math.floor(k[0] / 1000),
+            close: parseFloat(k[4]) * rate,
+            high: parseFloat(k[2]) * rate,
+            low: parseFloat(k[3]) * rate,
+            open: parseFloat(k[1]) * rate
         }));
 
-    } catch (e) {
-        console.warn(`[BinanceHist] Failed for ${symbol}:`, e.message);
+    } catch (_e) {
         return [];
     }
 }
 
+const candleCache = new Map();
+const CANDLE_CACHE_TTL = 3 * 60 * 1000; // 3 minutes TTL
+
+export function clearCandleCache() {
+    candleCache.clear();
+}
+
 export async function fetchHistory(symbol, currency, limit = 30) {
-    // Legacy simple fetch, mapped to fetchCandles
     return fetchCandles(symbol, currency, 'day', limit);
 }
 
 export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 30, aggregate = 1) {
+    const sym = String(symbol || '').toUpperCase();
+    const curr = String(currency || '').toUpperCase();
+    const cacheKey = `${sym}_${curr}_${timeframe}_${limit}_${aggregate}`;
+    const cached = candleCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && (now - cached.timestamp < CANDLE_CACHE_TTL) && cached.data?.length > 0) {
+        return cached.data;
+    }
+
+    let candles = [];
     try {
         let endpoint = 'histoday';
         if (timeframe === 'hour') endpoint = 'histohour';
         if (timeframe === 'minute') endpoint = 'histominute';
 
-        const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${symbol}&tsym=${currency}&limit=${limit}&aggregate=${aggregate}`;
+        const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${sym}&tsym=${curr}&limit=${limit}&aggregate=${aggregate}`;
         const res = await fetch(url);
+        if (!res.ok) throw new Error('CryptoCompare HTTP Error');
         const json = await res.json();
 
-        if (json.Response === 'Error') {
-            throw new Error(json.Message);
+        if (json.Response === 'Error' || json.Err || !json?.Data?.Data || !json?.Data?.Data?.length) {
+            throw new Error(json?.Message || json?.Err?.message || 'No candle data');
         }
 
-        return json?.Data?.Data || [];
+        candles = json.Data.Data;
     } catch (_e) {
-        // Fallback to Binance
-        // console.log(`[Hist] Fallback to Binance for ${symbol} (${timeframe})`);
-        return await fetchBinanceCandles(symbol, currency, timeframe, limit);
+        candles = await fetchBinanceCandles(sym, curr, timeframe, limit);
     }
+
+    if (candles && candles.length > 0) {
+        candleCache.set(cacheKey, { timestamp: now, data: candles });
+    }
+
+    return candles;
 }

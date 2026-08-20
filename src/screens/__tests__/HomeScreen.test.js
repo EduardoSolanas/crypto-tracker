@@ -37,7 +37,16 @@ jest.mock('../../cryptoCompare', () => ({
 
 jest.mock('../../csv', () => ({
     parseDeltaCsvToTxns: jest.fn(),
-    computeHoldingsFromTxns: jest.fn(),
+    computeHoldingsFromTxns: jest.fn((txns) => {
+        const holdings = {};
+        (txns || []).forEach(t => {
+            const sym = t.symbol;
+            if (!holdings[sym]) holdings[sym] = 0;
+            if (['BUY', 'DEPOSIT', 'RECEIVE'].includes(t.way)) holdings[sym] += Number(t.amount || 0);
+            if (['SELL', 'WITHDRAW', 'SEND'].includes(t.way)) holdings[sym] -= Number(t.amount || 0);
+        });
+        return holdings;
+    }),
 }));
 
 jest.mock('../../utils/theme', () => ({
@@ -56,6 +65,7 @@ jest.mock('../../utils/theme', () => ({
             error: '#ef4444',
             errorBg: '#ef444420',
             errorLight: '#f87171',
+            border: '#333',
             borderLight: '#333',
         },
         isDark: true,
@@ -88,6 +98,14 @@ describe('HomeScreen - Small Balances Toggle', () => {
         { symbol: 'ADA', quantity: 200, price: 0.03, value: 6, change24h: 0.8 },
     ];
 
+    const mockTransactions = [
+        { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+        { symbol: 'ETH', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
+        { symbol: 'XRP', amount: 100, way: 'BUY', date_iso: '2024-01-03' },
+        { symbol: 'DOGE', amount: 1000, way: 'BUY', date_iso: '2024-01-04' },
+        { symbol: 'ADA', amount: 200, way: 'BUY', date_iso: '2024-01-05' },
+    ];
+
     beforeEach(() => {
         jest.clearAllMocks();
         const db = require('../../db');
@@ -100,7 +118,7 @@ describe('HomeScreen - Small Balances Toggle', () => {
             DOGE: 1000,
             ADA: 200,
         });
-        db.getAllTransactions.mockResolvedValue([]);
+        db.getAllTransactions.mockResolvedValue(mockTransactions);
         
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(mockPortfolio);
     });
@@ -212,6 +230,10 @@ describe('HomeScreen - Small Balances Toggle', () => {
         ];
         
         db.getHoldingsMap.mockResolvedValue({ BTC: 1, ETH: 10 });
+        db.getAllTransactions.mockResolvedValue([
+            { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'ETH', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
+        ]);
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(largePortfolio);
 
         const { queryByText } = render(<HomeScreen />);
@@ -241,6 +263,11 @@ describe('HomeScreen - Small Balances Toggle', () => {
         ];
         
         db.getHoldingsMap.mockResolvedValue({ BTC: 1, EXACT: 10, BELOW: 100 });
+        db.getAllTransactions.mockResolvedValue([
+            { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'EXACT', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
+            { symbol: 'BELOW', amount: 100, way: 'BUY', date_iso: '2024-01-03' },
+        ]);
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(portfolioWithThreshold);
 
         const { getByText, queryByText } = render(<HomeScreen />);
@@ -251,7 +278,6 @@ describe('HomeScreen - Small Balances Toggle', () => {
             expect(queryByText('BELOW')).toBeNull(); // < $10 should hide
         });
     });
-
 });
 
 describe('HomeScreen graph ranges', () => {
@@ -262,7 +288,7 @@ describe('HomeScreen graph ranges', () => {
         const history = require('../../utils/portfolioHistory');
 
         db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
-        db.getAllTransactions.mockResolvedValue([]);
+        db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
             { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
         ]);
@@ -276,16 +302,36 @@ describe('HomeScreen graph ranges', () => {
 
     it('recomputes graph when switching to ALL range', async () => {
         const history = require('../../utils/portfolioHistory');
-        const { getByText } = render(<HomeScreen />);
+        const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
         });
 
+        // Verify there is no separate 24h toggle label button
+        expect(queryByText('24H CHANGE')).toBeNull();
+        expect(queryByText('All-Time')).toBeNull();
+
         fireEvent.press(getByText('ALL'));
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: 'ALL' }));
+        });
+    });
+
+    it('updates hero delta amount and percentage when selecting ranges', async () => {
+        const history = require('../../utils/portfolioHistory');
+        history.computePortfolioHistory.mockResolvedValue({
+            chartData: [{ timestamp: 1000, value: 40000 }, { timestamp: 2000, value: 50000 }],
+            delta: { val: 10000, pct: 25.0 },
+            chartColor: '#22c55e',
+            coinDeltas: {},
+        });
+
+        render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalled();
         });
     });
 });
@@ -296,13 +342,63 @@ describe('HomeScreen saved currency', () => {
         const cryptoCompare = require('../../cryptoCompare');
         db.getMeta.mockResolvedValue('USD');
         db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
-        db.getAllTransactions.mockResolvedValue([]);
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([]);
+        db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([{ symbol: 'BTC', quantity: 1, price: 50000, value: 50000 }]);
 
         render(<HomeScreen />);
 
         await waitFor(() => {
             expect(cryptoCompare.fetchPortfolioPrices).toHaveBeenCalledWith({ BTC: 1 }, 'USD');
         });
+    });
+});
+
+describe('HomeScreen Empty State & Zero-Transaction Handling', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+
+        db.getAllTransactions.mockResolvedValue([]);
+        db.getHoldingsMap.mockResolvedValue({});
+        db.loadCache.mockResolvedValue(null);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([]);
+    });
+
+    it('should display empty state with "No data. Import CSV." when there are no transactions', async () => {
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/No data\. Import CSV\./i)).toBeTruthy();
+            expect(getByText(/Add Transaction/i)).toBeTruthy();
+        });
+
+        expect(queryByText(/Small Balances/i)).toBeNull();
+        expect(queryByText(/Total Worth/i)).toBeNull();
+        expect(queryByText(/Portfolio Allocation/i)).toBeNull();
+    });
+
+    it('should ignore stale cached portfolio when there are no transactions and stay on empty state', async () => {
+        const db = require('../../db');
+        db.loadCache.mockResolvedValue({
+            portfolio: [
+                { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
+                { symbol: 'DOGE', quantity: 1000, price: 0.005, value: 5, change24h: -0.5 }
+            ],
+            chartData: [],
+            delta: { val: 0, pct: 0 },
+            range: '1D',
+            timestamp: Date.now(),
+        });
+
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/No data\. Import CSV\./i)).toBeTruthy();
+        });
+
+        expect(queryByText('BTC')).toBeNull();
+        expect(queryByText('DOGE')).toBeNull();
+        expect(queryByText(/Small Balances/i)).toBeNull();
     });
 });

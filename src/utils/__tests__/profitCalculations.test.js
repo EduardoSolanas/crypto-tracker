@@ -93,7 +93,8 @@ data,data,data`;
             const { txns, report } = parseDeltaCsvWithReport(csv);
 
             expect(txns).toHaveLength(0);
-            expect(report.reasons.invalid_amount).toBe(4);
+            expect(report.zeroAmountSync).toBe(1);
+            expect(report.reasons.invalid_amount).toBe(3);
         });
 
         it('skips impossible calendar dates instead of normalizing them', () => {

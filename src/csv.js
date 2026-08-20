@@ -17,18 +17,21 @@ const parseCSVLine = (text, delimiter = ',') => {
     return result;
 };
 
-const extractSymbol = (currencyStr) => {
+export const extractSymbol = (currencyStr) => {
     if (!currencyStr) return null;
     const str = currencyStr.trim();
     const match = str.match(/\((.*?)\)/);
+    let sym = '';
     if (match) {
         const contentInParens = match[1];
         const contentOutside = str.split('(')[0].trim();
-        return (contentOutside.length > 0 && contentOutside.length <= 5)
-            ? contentOutside.toUpperCase()
-            : contentInParens.toUpperCase();
+        sym = (contentOutside.length > 0 && contentOutside.length <= 5)
+            ? contentOutside
+            : contentInParens;
+    } else {
+        sym = str.split(' ')[0];
     }
-    return str.split(' ')[0].toUpperCase();
+    return sym.replace(/[*#@!]/g, '').trim().toUpperCase();
 };
 
 function parseDateToUtcIso(dateRaw) {
@@ -214,6 +217,12 @@ export function parseDeltaCsvWithReport(csvText) {
         if (!rawAmount || !rawCurrency || !way || !dateRaw) {
             report.skipped += 1;
             report.reasons[SKIP_REASONS.MISSING_REQUIRED] += 1;
+            continue;
+        }
+
+        const numericAmount = Number(rawAmount);
+        if (Number.isFinite(numericAmount) && numericAmount === 0) {
+            report.zeroAmountSync = (report.zeroAmountSync || 0) + 1;
             continue;
         }
 

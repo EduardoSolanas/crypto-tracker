@@ -45,7 +45,7 @@ describe('CryptoGraph', () => {
         });
     });
 
-    describe('Interaction Disabled', () => {
+    describe('Interaction Disabled & Compact Y-Axis Labels', () => {
         it('line chart has pointerEvents="none" to disable touch interactions', () => {
             const mockData = [
                 { timestamp: Date.now() - 86400000, value: 50000 },
@@ -56,7 +56,6 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="line" data={mockData} currency="USD" />
             );
 
-            // Find the root View that wraps the chart
             const rootView = UNSAFE_root.findByProps({ pointerEvents: 'none' });
             expect(rootView).toBeTruthy();
         });
@@ -71,7 +70,6 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="line" data={mockData} currency="USD" />
             );
 
-            // CursorCrosshair should not be rendered
             expect(queryByTestId('cursor-crosshair')).toBeNull();
         });
 
@@ -85,22 +83,23 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="line" data={mockData} currency="USD" />
             );
 
-            // PriceText should not be rendered
             expect(queryByTestId('price-text')).toBeNull();
         });
 
-        it('line chart shows only top and bottom Y-axis labels', () => {
+        it('line chart shows compact top and bottom Y-axis labels', () => {
             const mockData = [
                 { timestamp: Date.now() - 86400000, value: 50000 },
                 { timestamp: Date.now(), value: 52000 }
             ];
 
-            const { queryAllByTestId } = render(
+            const { getByTestId, queryAllByTestId } = render(
                 <CryptoGraph type="line" data={mockData} currency="USD" />
             );
 
             expect(queryAllByTestId('graph-y-max')).toHaveLength(1);
             expect(queryAllByTestId('graph-y-min')).toHaveLength(1);
+            expect(getByTestId('graph-y-max').props.children).toBe('$52K');
+            expect(getByTestId('graph-y-min').props.children).toBe('$50K');
         });
 
         it('candlestick chart has pointerEvents="none" to disable touch interactions', () => {
@@ -113,7 +112,6 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="candle" data={mockData} currency="USD" />
             );
 
-            // Find the root View that wraps the chart
             const rootView = UNSAFE_root.findByProps({ pointerEvents: 'none' });
             expect(rootView).toBeTruthy();
         });
@@ -128,7 +126,6 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="candle" data={mockData} currency="USD" />
             );
 
-            // Crosshair should not be rendered
             expect(queryByTestId('crosshair')).toBeNull();
         });
 
@@ -142,7 +139,6 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="candle" data={mockData} currency="USD" />
             );
 
-            // Interactive elements should not be rendered
             expect(queryByTestId('candle-price-text')).toBeNull();
             expect(queryByTestId('datetime-text')).toBeNull();
         });
@@ -161,9 +157,8 @@ describe('CryptoGraph', () => {
                 );
 
                 expect(getByTestId('line-chart')).toBeTruthy();
-                // Check min and max are displayed
-                expect(getByText(/\$10,000/)).toBeTruthy(); // Min value
-                expect(getByText(/\$15,900/)).toBeTruthy(); // Max value (59 * 100 + 10000)
+                expect(getByText('$10K')).toBeTruthy(); // Min value
+                expect(getByText('$15.9K')).toBeTruthy(); // Max value (59 * 100 + 10000)
             });
 
             it('plots downward trend correctly', () => {
@@ -177,8 +172,8 @@ describe('CryptoGraph', () => {
                 );
 
                 expect(getByTestId('line-chart')).toBeTruthy();
-                expect(getByText(/€20,000/)).toBeTruthy(); // Max
-                expect(getByText(/€14,100/)).toBeTruthy(); // Min (20000 - 59*100)
+                expect(getByText('€20K')).toBeTruthy(); // Max
+                expect(getByText('€14.1K')).toBeTruthy(); // Min (20000 - 59*100)
             });
 
             it('plots volatile intraday movements', () => {
@@ -194,8 +189,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                expect(getByText(/\$52,000/)).toBeTruthy(); // Peak
-                expect(getByText(/\$49,500/)).toBeTruthy(); // Trough
+                expect(getByText('$52K')).toBeTruthy(); // Peak
+                expect(getByText('$49.5K')).toBeTruthy(); // Trough
             });
         });
 
@@ -210,9 +205,6 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="GBP" />
                 );
 
-                expect(getByTestId('line-chart')).toBeTruthy();
-                // Should show max and min from the wave
-                // Just verify chart renders with wave data
                 expect(getByTestId('line-chart')).toBeTruthy();
             });
 
@@ -257,8 +249,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                expect(getByText(/\$31,000/)).toBeTruthy(); // End
-                expect(getByText(/\$25,000/)).toBeTruthy(); // Start
+                expect(getByText('$31K')).toBeTruthy(); // End
+                expect(getByText('$25K')).toBeTruthy(); // Start
             });
 
             it('plots weekly consolidation (range-bound)', () => {
@@ -271,8 +263,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="EUR" />
                 );
 
-                expect(getByText(/€48,500/)).toBeTruthy();
-                expect(getByText(/€47,500/)).toBeTruthy();
+                expect(getByText('€48.5K')).toBeTruthy();
+                expect(getByText('€47.5K')).toBeTruthy();
             });
 
             it('plots weekend pump pattern', () => {
@@ -288,8 +280,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="GBP" />
                 );
 
-                expect(getByText(/£35,000/)).toBeTruthy(); // Peak
-                expect(getByText(/£30,000/)).toBeTruthy(); // Base
+                expect(getByText('£35K')).toBeTruthy(); // Peak
+                expect(getByText('£30K')).toBeTruthy(); // Base
             });
         });
 
@@ -304,8 +296,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                expect(getByText(/\$34,500/)).toBeTruthy(); // Month end
-                expect(getByText(/\$20,000/)).toBeTruthy(); // Month start
+                expect(getByText('$34.5K')).toBeTruthy(); // Month end
+                expect(getByText('$20K')).toBeTruthy(); // Month start
             });
 
             it('plots bear market (consistent decline)', () => {
@@ -318,8 +310,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="EUR" />
                 );
 
-                expect(getByText(/€60,000/)).toBeTruthy(); // Start high
-                expect(getByText(/€36,800/)).toBeTruthy(); // End low
+                expect(getByText('€60K')).toBeTruthy(); // Start high
+                expect(getByText('€36.8K')).toBeTruthy(); // End low
             });
 
             it('plots mid-month correction', () => {
@@ -335,8 +327,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                expect(getByText(/\$46,000/)).toBeTruthy();
-                expect(getByText(/\$38,000/)).toBeTruthy();
+                expect(getByText('$46K')).toBeTruthy();
+                expect(getByText('$38K')).toBeTruthy();
             });
         });
 
@@ -351,7 +343,6 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                // Verify chart renders with parabolic data
                 expect(getByTestId('line-chart')).toBeTruthy();
             });
 
@@ -368,8 +359,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="EUR" />
                 );
 
-                expect(getByText(/€60,000/)).toBeTruthy(); // Peak
-                expect(getByText(/€20,000/)).toBeTruthy(); // Start
+                expect(getByText('€60K')).toBeTruthy(); // Peak
+                expect(getByText('€20K')).toBeTruthy(); // Start
             });
 
             it('plots sideways accumulation year', () => {
@@ -397,7 +388,6 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                // Verify chart renders with exponential data
                 expect(getByTestId('line-chart')).toBeTruthy();
             });
 
@@ -415,8 +405,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="EUR" />
                 );
 
-                expect(getByText(/€50,000/)).toBeTruthy();
-                expect(getByText(/€5,000/)).toBeTruthy();
+                expect(getByText('€50K')).toBeTruthy();
+                expect(getByText('€5K')).toBeTruthy();
             });
 
             it('plots early adoption to mainstream (hockey stick)', () => {
@@ -435,8 +425,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="USD" />
                 );
 
-                expect(getByText(/\$28,600/)).toBeTruthy(); // Recent high
-                expect(getByText(/\$100/)).toBeTruthy(); // Early days
+                expect(getByText('$28.6K')).toBeTruthy(); // Recent high
+                expect(getByText('$100')).toBeTruthy(); // Early days
             });
         });
 
@@ -461,8 +451,8 @@ describe('CryptoGraph', () => {
                     <CryptoGraph type="line" data={mockData} currency="EUR" />
                 );
 
-                expect(getByText(/€32,000/)).toBeTruthy();
-                expect(getByText(/€30,000/)).toBeTruthy();
+                expect(getByText('€32K')).toBeTruthy();
+                expect(getByText('€30K')).toBeTruthy();
             });
 
             it('handles very small values (satoshis)', () => {
@@ -505,8 +495,8 @@ describe('CryptoGraph', () => {
             );
 
             expect(getByTestId('candlestick-chart')).toBeTruthy();
-            expect(getByText(/\$53,000/)).toBeTruthy(); // Highest high
-            expect(getByText(/\$47,000/)).toBeTruthy(); // Lowest low
+            expect(getByText('$53K')).toBeTruthy(); // Highest high
+            expect(getByText('$47K')).toBeTruthy(); // Lowest low
         });
 
         it('plots bullish candles (green)', () => {
@@ -554,8 +544,8 @@ describe('CryptoGraph', () => {
                 <CryptoGraph type="candle" data={mockData} currency="GBP" />
             );
 
-            expect(getByText(/£47,000/)).toBeTruthy(); // Highest
-            expect(getByText(/£44,500/)).toBeTruthy(); // Lowest
+            expect(getByText('£47K')).toBeTruthy(); // Highest
+            expect(getByText('£44.5K')).toBeTruthy(); // Lowest
         });
     });
 });
@@ -576,5 +566,7 @@ describe('CryptoGraph web fallback', () => {
         expect(getByTestId('web-chart-fallback')).toBeTruthy();
         expect(getAllByTestId('graph-y-max')).toHaveLength(1);
         expect(getAllByTestId('graph-y-min')).toHaveLength(1);
+        expect(getAllByTestId('graph-y-max')[0].props.children).toBe('$52K');
+        expect(getAllByTestId('graph-y-min')[0].props.children).toBe('$50K');
     });
 });

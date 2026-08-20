@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MoreVertical, Plus } from 'lucide-react-native';
+import { ArrowLeft, BarChart3, MoreVertical, Plus, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     ActivityIndicator,
     Alert,
     InteractionManager,
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -26,26 +27,29 @@ import { useTheme } from '../utils/theme';
 const TransactionItem = React.memo(function TransactionItem({ transaction, sym, currency, coinPrice, onShowOptions, colors, fxRates, t }) {
     const isBuy = transaction.way === 'BUY' || transaction.way === 'DEPOSIT' || transaction.way === 'RECEIVE';
     const date = new Date(transaction.date_iso);
-    const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     const quoteCurrency = String(transaction.quote_currency || transaction.quoteCurrency || currency).toUpperCase();
     const fxRate = quoteCurrency === currency ? 1 : Number(fxRates?.[quoteCurrency] || 0);
     const normalizedQuoteAmount = fxRate > 0 ? (transaction.quote_amount || 0) * fxRate : (quoteCurrency === currency ? (transaction.quote_amount || 0) : 0);
 
-    // Calculate actual delta for this transaction
     const purchasePrice = transaction.amount > 0 ? normalizedQuoteAmount / transaction.amount : 0;
     const currentPrice = coinPrice || 0;
     const deltaPct = purchasePrice > 0 ? ((currentPrice - purchasePrice) / purchasePrice) * 100 : 0;
     const deltaVal = (currentPrice - purchasePrice) * transaction.amount;
-    const deltaColor = deltaVal >= 0 ? '#22c55e' : '#ef4444';
+    const isPositive = deltaVal >= 0;
 
     return (
         <View style={[styles.txCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.txHeader}>
-                <View style={[styles.txBadge, isBuy ? styles.bgGreen : styles.bgRed]}>
-                    <Text style={[styles.txBadgeText, isBuy ? styles.textGreen : styles.textRed]}>{transaction.way}</Text>
+                <View style={[styles.txBadge, isBuy ? { backgroundColor: colors.successBg, borderColor: colors.success } : { backgroundColor: colors.errorBg, borderColor: colors.error }]}>
+                    <Text style={[styles.txBadgeText, { color: isBuy ? colors.success : colors.error }]}>
+                        {transaction.way}
+                    </Text>
                 </View>
-                <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>{dateStr} {t('coin.at')} {timeStr} {t('coin.viaManual')}</Text>
+                <Text style={[styles.txHeaderDate, { color: colors.textSecondary }]}>
+                    {dateStr} {t('coin.at', 'at')} {timeStr}
+                </Text>
                 <TouchableOpacity onPress={() => onShowOptions(transaction)} hitSlop={15} style={{ marginLeft: 'auto' }}>
                     <MoreVertical size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
@@ -54,29 +58,48 @@ const TransactionItem = React.memo(function TransactionItem({ transaction, sym, 
             <View style={styles.txBody}>
                 <View style={styles.txRow}>
                     <View style={{ flex: 1 }}>
-                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.priceLabel', { sym, currency })}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(purchasePrice, currency)}</Text>
+                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>
+                            {t('coin.priceLabel', { sym, currency })}
+                        </Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {formatMoney(purchasePrice, currency)}
+                        </Text>
                     </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.amountAdded') : t('coin.amountRemoved')}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatNumber(transaction.amount, 6)}</Text>
-                    </View>
-                </View>
-                <View style={[styles.txRow, { marginTop: 12 }]}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{isBuy ? t('coin.costInclFee') : t('coin.received')}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(normalizedQuoteAmount, currency)}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.currentWorth')}</Text>
-                        <Text style={[styles.txValue, { color: colors.text }]}>{formatMoney(transaction.amount * currentPrice, currency)}</Text>
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>
+                            {isBuy ? t('coin.amountAdded', 'Amount Added') : t('coin.amountRemoved', 'Amount Removed')}
+                        </Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {formatNumber(transaction.amount, 6)}
+                        </Text>
                     </View>
                 </View>
 
-                <View style={{ marginTop: 12 }}>
-                    <Text style={[styles.txLabel, { color: colors.textSecondary }]}>{t('coin.delta')}</Text>
-                    <Text style={{ color: deltaColor, fontWeight: 'bold', fontSize: 14 }}>
-                        {deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(2)}% ({formatMoney(deltaVal, currency)})
+                <View style={[styles.txRow, { marginTop: 10 }]}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>
+                            {isBuy ? t('coin.costInclFee', 'Cost') : t('coin.received', 'Received')}
+                        </Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {formatMoney(normalizedQuoteAmount, currency)}
+                        </Text>
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <Text style={[styles.txLabel, { color: colors.textSecondary }]}>
+                            {t('coin.currentWorth', 'Current Worth')}
+                        </Text>
+                        <Text style={[styles.txValue, { color: colors.text }]}>
+                            {formatMoney(transaction.amount * currentPrice, currency)}
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={[styles.txRow, { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                    <Text style={[styles.txLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
+                        {t('coin.delta', 'Return')}
+                    </Text>
+                    <Text style={{ color: isPositive ? colors.success : colors.error, fontWeight: '700', fontSize: 13 }}>
+                        {isPositive ? '+' : ''}{deltaPct.toFixed(2)}% ({isPositive ? '+' : ''}{formatMoney(deltaVal, currency)})
                     </Text>
                 </View>
             </View>
@@ -102,6 +125,7 @@ export default function CoinScreen() {
     const [chartError, setChartError] = useState('');
     const [deferredReady, setDeferredReady] = useState(false);
     const [fxRates, setFxRates] = useState({});
+    const [isBreakdownVisible, setIsBreakdownVisible] = useState(false);
 
     const refreshData = useCallback(async () => {
         try {
@@ -111,36 +135,38 @@ export default function CoinScreen() {
             const p = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, currency);
             setCoin(p[0] || { symbol: sym, quantity: holdings[sym] || 0, price: 0, value: 0, change24h: 0 });
         } catch (_e) {
-            Alert.alert(t('coin.unableRefreshTitle'), t('coin.unableRefreshMessage'));
+            Alert.alert(t('coin.unableRefreshTitle', 'Error'), t('coin.unableRefreshMessage', 'Unable to refresh coin data.'));
         }
     }, [sym, currency, t]);
 
     useEffect(() => {
+        let isMounted = true;
         (async () => {
             setLoading(true);
             try {
                 const c = (await getMeta('currency')) || 'EUR';
+                if (!isMounted) return;
                 setCurrency(c);
 
                 const holdings = await getHoldingsMap();
                 const p = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, c);
+                if (!isMounted) return;
                 setCoin(p[0] || { symbol: sym, quantity: holdings[sym] || 0, price: 0, value: 0, change24h: 0 });
-
-                // Price is shown, now unblock the UI
                 setLoading(false);
 
-                // Now fetch transactions in background
                 const rows = await listTransactionsBySymbol(sym);
+                if (!isMounted) return;
                 setTxs(rows);
 
                 InteractionManager.runAfterInteractions(() => {
-                    setDeferredReady(true);
+                    if (isMounted) setDeferredReady(true);
                 });
             } catch (e) {
                 if (globalThis.__DEV__) console.error('Initial load error:', e);
-                setLoading(false);
+                if (isMounted) setLoading(false);
             }
         })();
+        return () => { isMounted = false; };
     }, [sym]);
 
     useEffect(() => {
@@ -151,6 +177,7 @@ export default function CoinScreen() {
                     .map((t) => String(t.quote_currency || t.quoteCurrency || currency).toUpperCase())
                     .filter(Boolean)
             )];
+            if (!quoteCurrencies.length) return;
             const rates = await fetchFxRates(quoteCurrencies, currency);
             if (active) {
                 setFxRates(rates);
@@ -191,7 +218,7 @@ export default function CoinScreen() {
                 }
             } catch (e) {
                 if (isMounted) {
-                    setChartError(e?.message || t('home.refreshErrorTitle'));
+                    setChartError(e?.message || t('home.refreshErrorTitle', 'Refresh Error'));
                     setChartData([]);
                 }
             } finally {
@@ -208,40 +235,48 @@ export default function CoinScreen() {
         });
     }, [currency, fxRates, txs, coin]);
 
+    const unrealizedGains = useMemo(() => {
+        const marketVal = (coin?.price || 0) * (coin?.quantity || 0);
+        return marketVal - (txStats.totalCostBasis || 0);
+    }, [coin?.price, coin?.quantity, txStats.totalCostBasis]);
+
     const handleDeleteTransaction = useCallback(async (id) => {
         try {
             const { deleteTransaction, syncHoldingsForSymbol } = await import('../db');
             await deleteTransaction(id);
             await syncHoldingsForSymbol(sym);
             await refreshData();
-            Alert.alert(t('coin.deletedTitle'), t('coin.deletedMessage'));
+            Alert.alert(t('coin.deletedTitle', 'Deleted'), t('coin.deletedMessage', 'Transaction removed'));
         } catch (_e) {
-            Alert.alert(t('general.error'), t('coin.deleteFailedMessage'));
+            Alert.alert(t('general.error', 'Error'), t('coin.deleteFailedMessage', 'Failed to delete transaction'));
         }
     }, [refreshData, sym, t]);
 
     const showTransactionOptions = useCallback((tx) => {
         Alert.alert(
-            t('coin.transactionOptionsTitle'),
-            t('coin.transactionOptionsMessage'),
+            t('coin.transactionOptionsTitle', 'Transaction Options'),
+            t('coin.transactionOptionsMessage', 'Select an action for this transaction:'),
             [
-                { text: t('general.edit'), onPress: () => router.push({ pathname: '/add-transaction', params: { id: tx.id, symbol: sym } }) },
+                { text: t('general.edit', 'Edit'), onPress: () => router.push({ pathname: '/add-transaction', params: { id: tx.id, symbol: sym } }) },
                 {
-                    text: t('general.delete'),
+                    text: t('general.delete', 'Delete'),
                     style: 'destructive',
-                    onPress: () => Alert.alert(t('coin.confirmDeleteTitle'), t('coin.confirmDeleteMessage'), [
-                        { text: t('general.cancel'), style: 'cancel' },
-                        { text: t('general.delete'), style: 'destructive', onPress: () => handleDeleteTransaction(tx.id) }
-                    ])
+                    onPress: () => Alert.alert(
+                        t('coin.confirmDeleteTitle', 'Confirm Delete'),
+                        t('coin.confirmDeleteMessage', 'Are you sure you want to delete this transaction?'),
+                        [
+                            { text: t('general.cancel', 'Cancel'), style: 'cancel' },
+                            { text: t('general.delete', 'Delete'), style: 'destructive', onPress: () => handleDeleteTransaction(tx.id) }
+                        ]
+                    )
                 },
-                { text: t('general.cancel'), style: 'cancel' }
+                { text: t('general.cancel', 'Cancel'), style: 'cancel' }
             ]
         );
     }, [handleDeleteTransaction, sym, t]);
 
     const transactionList = useMemo(() => {
         if (!deferredReady && activeTab !== 'Transactions') return null;
-        // Limit to 100 transactions to prevent UI lag on large histories (like BTC)
         const visibleTxs = txs.slice(0, 100);
         return visibleTxs.map((transaction) => (
             <TransactionItem
@@ -260,71 +295,107 @@ export default function CoinScreen() {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
+            {/* Header */}
+            <View style={[styles.header, { borderBottomColor: colors.border }]}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={15}>
                     <ArrowLeft size={24} color={colors.text} />
                 </TouchableOpacity>
                 <View style={{ alignItems: 'center', flexDirection: 'row' }}>
                     <CoinIcon symbol={sym} imageUrl={coin?.imageUrl} size={32} style={{ marginRight: 10 }} />
                     <View style={{ alignItems: 'center' }}>
                         <Text style={[styles.headerTitle, { color: colors.text }]}>{sym}</Text>
-                        <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{t('coin.status', { symbol: sym })}</Text>
+                        <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
+                            {t('coin.status', { symbol: sym })}
+                        </Text>
                     </View>
                 </View>
-                <View style={{ width: 24 }} />
+                <View style={{ width: 28 }} />
             </View>
 
             {loading ? (
                 <View style={styles.center}>
-                    <ActivityIndicator color={colors.text} />
+                    <ActivityIndicator color={colors.text} size="large" />
                 </View>
             ) : (
                 <ScrollView contentContainerStyle={{ paddingBottom: 40 }} stickyHeaderIndices={[2]}>
+                    {/* Top Stats Cards */}
                     <View style={styles.statsRow}>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned')}</Text>
+                        <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.owned', 'Owned')}</Text>
                             <Text style={[styles.statValue, { color: colors.text }]}>{formatQuantity(coin?.quantity || 0)}</Text>
                         </View>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue')}</Text>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value, currency)}</Text>
+                        <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.marketValue', 'Market Value')}</Text>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{formatMoney(coin?.value || 0, currency)}</Text>
                         </View>
-                        <View>
-                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains')}</Text>
-                            <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                {formatMoney(txStats.totalGains, currency)}
+                        <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('coin.totalGains', 'Total P&L')}</Text>
+                            <Text style={[styles.statValue, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                                {txStats.totalGains >= 0 ? '+' : ''}{formatMoney(txStats.totalGains, currency)}
                             </Text>
                         </View>
                     </View>
 
-                    <TouchableOpacity style={styles.breakdownBtn}>
-                        <Text style={[styles.breakdownText, { color: colors.textSecondary }]}>{t('coin.showBreakdown')}</Text>
+                    {/* Breakdown Action Button */}
+                    <TouchableOpacity
+                        style={[styles.breakdownBtn, { backgroundColor: colors.surfaceElevated }]}
+                        onPress={() => setIsBreakdownVisible(true)}
+                    >
+                        <BarChart3 size={15} color={colors.text} style={{ marginRight: 6 }} />
+                        <Text style={[styles.breakdownText, { color: colors.text }]}>
+                            {t('coin.showBreakdown', 'Show Cost & Gains Breakdown')}
+                        </Text>
                     </TouchableOpacity>
 
-                    <View style={{ backgroundColor: colors.background, paddingBottom: 8 }}>
+                    {/* Tabs */}
+                    <View style={{ backgroundColor: colors.background, paddingBottom: 4 }}>
                         <View style={[styles.tabRow, { borderBottomColor: colors.border }]}>
-                            <TouchableOpacity style={[styles.tabItem, activeTab === 'General' && { ...styles.tabActive, borderBottomColor: colors.text }]} onPress={() => setActiveTab('General')}>
-                                <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'General' && { ...styles.tabTextActive, color: colors.text }]}>{t('coin.generalTab')}</Text>
+                            <TouchableOpacity
+                                style={[styles.tabItem, activeTab === 'General' && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}
+                                onPress={() => setActiveTab('General')}
+                            >
+                                <Text style={[
+                                    styles.tabText,
+                                    { color: colors.textSecondary },
+                                    activeTab === 'General' && { color: colors.text, fontWeight: '700' }
+                                ]}>
+                                    {t('coin.generalTab', 'Overview & Chart')}
+                                </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.tabItem, activeTab === 'Transactions' && { ...styles.tabActive, borderBottomColor: colors.text }]} onPress={() => setActiveTab('Transactions')}>
-                                <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'Transactions' && { ...styles.tabTextActive, color: colors.text }]}>{t('coin.transactionsTab')}</Text>
+
+                            <TouchableOpacity
+                                style={[styles.tabItem, activeTab === 'Transactions' && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}
+                                onPress={() => setActiveTab('Transactions')}
+                            >
+                                <Text style={[
+                                    styles.tabText,
+                                    { color: colors.textSecondary },
+                                    activeTab === 'Transactions' && { color: colors.text, fontWeight: '700' }
+                                ]}>
+                                    {t('coin.transactionsTab', 'Transactions')} ({txs.length})
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
 
-                    <View style={{ display: activeTab === 'General' ? 'flex' : 'none' }}>
+                    {/* General / Chart Tab Content */}
+                    {activeTab === 'General' && (
                         <View style={styles.chartSection}>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 }}>
                                 <View>
-                                    <Text style={[styles.bigPrice, { color: colors.text }]}>{formatMoney(coin?.price, currency)}</Text>
-                                    <Text style={[styles.priceChange, { color: coin?.change24h >= 0 ? '#22c55e' : '#ef4444' }]}>
-                                        {formatMoney(coin?.price * (coin?.change24h / 100), currency)}
-                                        ({coin?.change24h >= 0 ? '+' : ''}{coin?.change24h?.toFixed(2)}%)
+                                    <Text style={[styles.bigPrice, { color: colors.text }]}>
+                                        {formatMoney(coin?.price || 0, currency)}
+                                    </Text>
+                                    <Text style={[styles.priceChange, { color: (coin?.change24h || 0) >= 0 ? colors.success : colors.error }]}>
+                                        {(coin?.change24h || 0) >= 0 ? '+' : ''}{formatMoney((coin?.price || 0) * ((coin?.change24h || 0) / 100), currency)} ({(coin?.change24h || 0) >= 0 ? '+' : ''}{(coin?.change24h || 0).toFixed(2)}%)
                                     </Text>
                                 </View>
-                                <View style={{ alignItems: 'flex-end' }}>
-                                    <Text style={{ color: colors.text, fontWeight: 'bold' }}>{t('coin.market')}</Text>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{sym}/{currency}</Text>
+                                <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                                    <View style={[styles.marketBadge, { backgroundColor: colors.surfaceElevated }]}>
+                                        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>
+                                            {sym} / {currency}
+                                        </Text>
+                                    </View>
                                 </View>
                             </View>
 
@@ -337,12 +408,12 @@ export default function CoinScreen() {
                                     <CryptoGraph type="candle" data={chartData} currency={currency} />
                                     {!!chartError && (
                                         <View style={{ alignItems: 'center', marginTop: 8 }}>
-                                            <Text style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>{chartError}</Text>
+                                            <Text style={{ color: colors.error, fontSize: 12, marginBottom: 8 }}>{chartError}</Text>
                                             <TouchableOpacity
                                                 onPress={refreshData}
                                                 style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.surfaceElevated }}
                                             >
-                                                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{t('general.retry')}</Text>
+                                                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{t('general.retry', 'Retry')}</Text>
                                             </TouchableOpacity>
                                         </View>
                                     )}
@@ -354,7 +425,7 @@ export default function CoinScreen() {
                                                 disabled={chartLoading}
                                                 style={[
                                                     styles.rangePill,
-                                                    range === r && { ...styles.rangePillActive, backgroundColor: colors.surfaceElevated },
+                                                    range === r && { backgroundColor: colors.surfaceElevated },
                                                     chartLoading && { opacity: 0.5 }
                                                 ]}
                                             >
@@ -368,82 +439,286 @@ export default function CoinScreen() {
                                 </>
                             )}
                         </View>
-                    </View>
+                    )}
 
-                    <View style={{ display: activeTab === 'Transactions' ? 'flex' : 'none' }}>
-                        <View style={{ paddingHorizontal: 16 }}>
-                            <View style={styles.txStatsGrid}>
+                    {/* Transactions Tab Content */}
+                    {activeTab === 'Transactions' && (
+                        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+                            {/* Summary Grid */}
+                            <View style={[styles.txStatsGrid, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                                 <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice')}</Text>
+                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgBuyPrice', 'Avg Buy')}</Text>
                                     <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgBuy, currency)}</Text>
                                 </View>
                                 <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice')}</Text>
+                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.avgSellPrice', 'Avg Sell')}</Text>
                                     <Text style={[styles.txStatValue, { color: colors.text }]}>{formatMoney(txStats.avgSell, currency)}</Text>
                                 </View>
                                 <View style={styles.txStatItem}>
-                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.transactionsCount')}</Text>
+                                    <Text style={[styles.txStatLabel, { color: colors.textSecondary }]}>{t('coin.transactionsCount', '# Txns')}</Text>
                                     <Text style={[styles.txStatValue, { color: colors.text }]}>{txStats.count}</Text>
                                 </View>
                             </View>
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 16 }}>
-                                <TouchableOpacity style={[styles.addTxBtn, { backgroundColor: colors.primary }]} onPress={() => router.push('/add-transaction')}>
-                                    <Plus color={colors.primaryInverse} size={20} />
-                                    <Text style={{ fontWeight: 'bold', fontSize: 14, marginLeft: 8, color: colors.primaryInverse }}>{t('coin.newTransaction')}</Text>
-                                </TouchableOpacity>
-                            </View>
+                            <TouchableOpacity
+                                style={[styles.addTxBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => router.push({ pathname: '/add-transaction', params: { symbol: sym } })}
+                            >
+                                <Plus color={colors.primaryInverse} size={18} />
+                                <Text style={{ fontWeight: '700', fontSize: 14, marginLeft: 6, color: colors.primaryInverse }}>
+                                    {t('coin.newTransaction', 'New Transaction')}
+                                </Text>
+                            </TouchableOpacity>
 
                             {transactionList}
                         </View>
-                    </View>
+                    )}
                 </ScrollView>
             )}
+
+            {/* Cost & PnL Breakdown Modal */}
+            <Modal visible={isBreakdownVisible} transparent animationType="slide">
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>
+                                {sym} {t('coin.breakdownTitle', 'Cost & Gains Breakdown')}
+                            </Text>
+                            <TouchableOpacity onPress={() => setIsBreakdownVisible(false)} hitSlop={15}>
+                                <X size={22} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={{ maxHeight: 400 }}>
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
+                                    {t('coin.currentPrice', 'Current Price')}
+                                </Text>
+                                <Text style={[styles.breakdownVal, { color: colors.text }]}>
+                                    {formatMoney(coin?.price || 0, currency)}
+                                </Text>
+                            </View>
+
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
+                                    {t('coin.totalInvested', 'Total Cost Basis')}
+                                </Text>
+                                <Text style={[styles.breakdownVal, { color: colors.text }]}>
+                                    {formatMoney(txStats.totalCostBasis || 0, currency)}
+                                </Text>
+                            </View>
+
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
+                                    {t('coin.unrealizedPnl', 'Unrealized P&L')}
+                                </Text>
+                                <Text style={[styles.breakdownVal, { color: unrealizedGains >= 0 ? colors.success : colors.error }]}>
+                                    {unrealizedGains >= 0 ? '+' : ''}{formatMoney(unrealizedGains, currency)}
+                                </Text>
+                            </View>
+
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
+                                    {t('coin.realizedPnl', 'Realized P&L')}
+                                </Text>
+                                <Text style={[styles.breakdownVal, { color: (txStats.realizedGains || 0) >= 0 ? colors.success : colors.error }]}>
+                                    {(txStats.realizedGains || 0) >= 0 ? '+' : ''}{formatMoney(txStats.realizedGains || 0, currency)}
+                                </Text>
+                            </View>
+
+                            <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 4 }]}>
+                                <Text style={[styles.breakdownTotalLabel, { color: colors.text }]}>
+                                    {t('coin.totalGains', 'Net Total P&L')}
+                                </Text>
+                                <Text style={[styles.breakdownTotalVal, { color: txStats.totalGains >= 0 ? colors.success : colors.error }]}>
+                                    {txStats.totalGains >= 0 ? '+' : ''}{formatMoney(txStats.totalGains, currency)}
+                                </Text>
+                            </View>
+
+                            {/* Market Stats if available */}
+                            {coin?.high24h > 0 && (
+                                <View style={{ marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+                                    <View style={styles.breakdownRow}>
+                                        <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>{t('coin.high24h', '24h High')}</Text>
+                                        <Text style={[styles.breakdownVal, { color: colors.text }]}>{formatMoney(coin.high24h, currency)}</Text>
+                                    </View>
+                                    <View style={styles.breakdownRow}>
+                                        <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>{t('coin.low24h', '24h Low')}</Text>
+                                        <Text style={[styles.breakdownVal, { color: colors.text }]}>{formatMoney(coin.low24h, currency)}</Text>
+                                    </View>
+                                    {coin?.mktCap > 0 && (
+                                        <View style={styles.breakdownRow}>
+                                            <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>{t('coin.marketCap', 'Market Cap')}</Text>
+                                            <Text style={[styles.breakdownVal, { color: colors.text }]}>{formatMoney(coin.mktCap, currency)}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+                        </ScrollView>
+
+                        <TouchableOpacity
+                            style={[styles.closeModalBtn, { backgroundColor: colors.surfaceElevated }]}
+                            onPress={() => setIsBreakdownVisible(false)}
+                        >
+                            <Text style={{ color: colors.text, fontWeight: '700' }}>
+                                {t('general.close', 'Close')}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    header: {
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottomWidth: 1,
+    },
     headerTitle: { fontSize: 18, fontWeight: 'bold' },
     headerSub: { fontSize: 12 },
-    backBtn: { padding: 4 },
+    backBtn: { padding: 6, borderRadius: 8 },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    statsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-    statLabel: { fontSize: 11, textAlign: 'center' },
-    statValue: { fontSize: 15, fontWeight: 'bold', textAlign: 'center', marginTop: 4 },
-    breakdownBtn: { flexDirection: 'row', justifyContent: 'center', marginBottom: 20 },
-    breakdownText: { fontSize: 13 },
-    tabRow: { flexDirection: 'row', borderBottomWidth: 1 },
-    tabItem: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-    tabActive: { borderBottomWidth: 2 },
-    tabText: { fontWeight: '600' },
-    tabTextActive: {},
+
+    statsRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        gap: 8,
+    },
+    statBox: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+    },
+    statLabel: { fontSize: 11, fontWeight: '500', marginBottom: 4 },
+    statValue: { fontSize: 14, fontWeight: '700' },
+
+    breakdownBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginHorizontal: 16,
+        marginBottom: 14,
+        paddingVertical: 8,
+        borderRadius: 10,
+    },
+    breakdownText: { fontSize: 13, fontWeight: '600' },
+
+    tabRow: {
+        flexDirection: 'row',
+        borderBottomWidth: 1,
+    },
+    tabItem: {
+        flex: 1,
+        alignItems: 'center',
+        paddingVertical: 12,
+    },
+    tabText: { fontSize: 14, fontWeight: '500' },
+
     chartSection: { paddingTop: 16 },
-    bigPrice: { fontSize: 32, fontWeight: 'bold' },
-    priceChange: { fontWeight: 'bold', marginTop: 4 },
-    rangeRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 16 },
-    rangePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-    rangePillActive: {},
+    bigPrice: { fontSize: 32, fontWeight: '800' },
+    priceChange: { fontWeight: '700', fontSize: 14, marginTop: 4 },
+    marketBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+    },
+
+    rangeRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        marginTop: 16,
+    },
+    rangePill: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 14,
+    },
     rangeText: { fontSize: 13, fontWeight: '600' },
-    rangeTextActive: {},
-    txStatsGrid: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 16 },
+
+    txStatsGrid: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingVertical: 12,
+        marginBottom: 16,
+    },
     txStatItem: { alignItems: 'center' },
-    txStatLabel: { fontSize: 11, marginBottom: 4 },
-    txStatValue: { fontWeight: 'bold', fontSize: 15 },
-    addTxBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20 },
-    txCard: { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 12 },
-    txHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-    txBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 8, borderWidth: 1 },
-    bgGreen: { borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)' },
-    bgRed: { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)' },
-    txBadgeText: { fontSize: 11, fontWeight: 'bold' },
-    textGreen: { color: '#22c55e' },
-    textRed: { color: '#ef4444' },
-    txHeaderDate: { fontSize: 11 },
+    txStatLabel: { fontSize: 11, marginBottom: 4, fontWeight: '500' },
+    txStatValue: { fontWeight: '700', fontSize: 15 },
+
+    addTxBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        borderRadius: 12,
+        marginBottom: 16,
+    },
+
+    txCard: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+    },
+    txHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+    txBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginRight: 8, borderWidth: 1 },
+    txBadgeText: { fontSize: 11, fontWeight: '800' },
+    txHeaderDate: { fontSize: 12 },
     txBody: {},
-    txRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    txLabel: { fontSize: 11, marginBottom: 4 },
-    txValue: { fontWeight: 'bold', fontSize: 14 },
+    txRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    txLabel: { fontSize: 11, marginBottom: 2 },
+    txValue: { fontWeight: '700', fontSize: 14 },
+
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    modalContent: {
+        width: '100%',
+        maxWidth: 450,
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 20,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    modalTitle: { fontSize: 17, fontWeight: '700' },
+    breakdownRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginVertical: 6,
+    },
+    breakdownLabel: { fontSize: 13 },
+    breakdownVal: { fontSize: 14, fontWeight: '600' },
+    breakdownTotalLabel: { fontSize: 14, fontWeight: '700' },
+    breakdownTotalVal: { fontSize: 16, fontWeight: '800' },
+    closeModalBtn: {
+        marginTop: 16,
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
 });

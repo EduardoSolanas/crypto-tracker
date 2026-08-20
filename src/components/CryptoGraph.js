@@ -1,15 +1,10 @@
 import { Dimensions, Text, View } from 'react-native';
 import { CandlestickChart, LineChart } from 'react-native-wagmi-charts';
 import { downsampleCandleData, downsampleLineData } from '../utils/chartSampling';
+import { formatCompactMoney } from '../utils/format';
 import { useTheme } from '../utils/theme';
 
-const formatYLabel = (val, currency) => {
-    if (!val) return '';
-    const n = Number(val);
-    if (isNaN(n)) return '';
-    // Format compact for space saving
-    return n.toLocaleString(undefined, { maximumFractionDigits: 0, style: 'currency', currency: currency || 'USD' });
-};
+const formatYLabel = (val, currency) => formatCompactMoney(val, currency);
 
 function GridLines({ isDark }) {
     return (

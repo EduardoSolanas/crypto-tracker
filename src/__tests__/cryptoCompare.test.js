@@ -142,4 +142,96 @@ describe('fetchPortfolioPrices pricing cascade', () => {
         expect(result[0].value).toBe(61000);
         expect(global.fetch.mock.calls[1][0]).toContain('api.binance.com/api/v3/ticker/24hr?symbol=BTCUSD');
     });
+
+    it('falls back to USDT pair converted to EUR when direct pair is missing on Binance', async () => {
+        global.fetch
+            .mockResolvedValueOnce(jsonResponse({ Err: { message: 'API key required' } }, false))
+            .mockResolvedValueOnce(jsonResponse({ price: '1.20' })) // EURUSDT rate
+            .mockResolvedValueOnce(jsonResponse({}, false)) // AXSEUR missing
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    lastPrice: '1.20',
+                    priceChangePercent: '5.0',
+                    highPrice: '1.30',
+                    lowPrice: '1.10',
+                    volume: '500',
+                })
+            );
+
+        const result = await fetchPortfolioPrices({ AXS: 10 }, 'EUR');
+
+        expect(result).toHaveLength(1);
+        expect(result[0].symbol).toBe('AXS');
+        expect(result[0].price).toBeCloseTo(1.0, 2); // 1.20 / 1.20 = 1.0 EUR
+        expect(result[0].value).toBeCloseTo(10.0, 2);
+    });
+
+    it('falls back to Coinbase spot rate for tokens missing on Binance', async () => {
+        global.fetch
+            .mockResolvedValueOnce(jsonResponse({ Err: { message: 'API key required' } }, false))
+            .mockResolvedValueOnce(jsonResponse({ price: '1.00' })) // EURUSDT
+            .mockResolvedValueOnce(jsonResponse({}, false)) // PLUEUR missing on Binance
+            .mockResolvedValueOnce(jsonResponse({}, false)) // PLUUSDT missing on Binance
+            .mockResolvedValueOnce(jsonResponse({ data: { amount: '0.12', base: 'PLU', currency: 'EUR' } })); // Coinbase
+
+        const result = await fetchPortfolioPrices({ PLU: 100 }, 'EUR');
+
+        expect(result).toHaveLength(1);
+        expect(result[0].symbol).toBe('PLU');
+        expect(result[0].price).toBe(0.12);
+        expect(result[0].value).toBe(12);
+    });
+});
+
+describe('fetchCandles historical chart fetcher', () => {
+    beforeEach(() => {
+        global.fetch = jest.fn();
+    });
+
+    afterEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('falls back to Binance klines when CryptoCompare returns Err or 401', async () => {
+        const { fetchCandles } = require('../cryptoCompare');
+
+        global.fetch
+            .mockResolvedValueOnce(jsonResponse({ Err: { message: 'API key required', http_status_code: 401 } }))
+            .mockResolvedValueOnce(
+                jsonResponse([
+                    [1700000000000, '60000', '61000', '59000', '60500', '100'],
+                    [1700003600000, '60500', '62000', '60000', '61500', '120'],
+                ])
+            );
+
+        const candles = await fetchCandles('BTC', 'EUR', 'hour', 24);
+
+        expect(candles).toHaveLength(2);
+        expect(candles[0].time).toBe(1700000000);
+        expect(candles[0].close).toBe(60500);
+        expect(candles[1].close).toBe(61500);
+        expect(global.fetch.mock.calls[1][0]).toContain('api.binance.com/api/v3/klines?symbol=BTCEUR&interval=1h&limit=24');
+    });
+
+    it('serves repeated candle requests from in-memory cache without repeating network calls', async () => {
+        const { fetchCandles, clearCandleCache } = require('../cryptoCompare');
+        if (clearCandleCache) clearCandleCache();
+
+        global.fetch
+            .mockResolvedValueOnce(jsonResponse({ Err: { message: 'API key required' } }, false))
+            .mockResolvedValueOnce(
+                jsonResponse([
+                    [1700000000000, '60000', '61000', '59000', '60500', '100'],
+                ])
+            );
+
+        const first = await fetchCandles('BTC', 'EUR', 'hour', 24);
+        expect(first).toHaveLength(1);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+
+        // Second call for same symbol/currency/timeframe/limit should be instant from cache
+        const second = await fetchCandles('BTC', 'EUR', 'hour', 24);
+        expect(second).toEqual(first);
+        expect(global.fetch).toHaveBeenCalledTimes(2); // No new network calls made!
+    });
 });

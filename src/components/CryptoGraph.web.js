@@ -1,17 +1,9 @@
 import { Dimensions, Text, View } from 'react-native';
 import { downsampleCandleData, downsampleLineData } from '../utils/chartSampling';
+import { formatCompactMoney } from '../utils/format';
 import { useTheme } from '../utils/theme';
 
-const formatYLabel = (value, currency) => {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return '';
-
-    return number.toLocaleString(undefined, {
-        maximumFractionDigits: 0,
-        style: 'currency',
-        currency: currency || 'USD',
-    });
-};
+const formatYLabel = (value, currency) => formatCompactMoney(value, currency);
 
 /**
  * react-native-wagmi-charts relies on native Reanimated worklets and cannot be
