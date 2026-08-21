@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -55,3 +55,11 @@ jobs:
             --branch "$CHANNEL" \
             --message "$MESSAGE" \
             --non-interactive
+
+          echo "## ⚡ EAS OTA Update Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Channel/Branch** | \`$CHANNEL\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Message** | \`$MESSAGE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY

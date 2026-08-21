@@ -35,7 +35,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -59,8 +59,40 @@ jobs:
             SUBMIT_FLAG="--auto-submit"
           fi
 
+          # Run EAS build, output to console and capture to log file
           npx eas-cli build \
             --platform "$PLATFORM" \
             --profile "$PROFILE" \
             --non-interactive \
-            $SUBMIT_FLAG
+            $SUBMIT_FLAG 2>&1 | tee build_output.log
+
+          # Extract Expo build URL
+          BUILD_URL=$(grep -o -E 'https://expo\.dev/accounts/[^/]+/projects/[^/]+/builds/[a-f0-9-]+' build_output.log | head -n 1)
+
+          if [ -z "$BUILD_URL" ]; then
+            BUILD_URL=$(grep -o -E 'https://expo\.dev/artifacts/[^ ]*' build_output.log | head -n 1)
+          fi
+
+          echo "## 🚀 EAS Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platform** | \`$PLATFORM\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Profile** | \`$PROFILE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "$BUILD_URL" ]; then
+            echo "### 📲 Download & Install" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 **Direct Link**: [$BUILD_URL]($BUILD_URL)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### 📱 Scan QR Code on your Phone:" >> $GITHUB_STEP_SUMMARY
+            ENCODED_URL=$(node -e "console.log(encodeURIComponent('$BUILD_URL'))")
+            echo "<img src=\"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=$ENCODED_URL\" alt=\"Install QR Code\" width=\"220\" height=\"220\" />" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> Scan the QR code with your phone camera or tap the link above to download and install the build." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ *Build finished. Check logs above for detailed output.*" >> $GITHUB_STEP_SUMMARY
+          fi
