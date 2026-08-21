@@ -1,7 +1,6 @@
 // src/db.native.js
 import * as SQLite from 'expo-sqlite';
 import { computeHoldingsFromTxns } from './csv';
-import { logger } from './utils/logger.js';
 
 let dbPromise;
 const debugLog = (...args) => {
@@ -62,6 +61,12 @@ export async function initDb() {
     );
   `);
 
+    // Ensure holdings table is clean when transactions table is empty
+    const txCountRow = await db.getFirstAsync('SELECT COUNT(*) as count FROM transactions');
+    if ((txCountRow?.count ?? 0) === 0) {
+        await db.execAsync('DELETE FROM holdings;');
+    }
+
     debugLog('[DB][native] schema ready');
 }
 
@@ -96,7 +101,14 @@ export async function clearAllData() {
     await db.execAsync(`
         DELETE FROM transactions;
         DELETE FROM holdings;
-        DELETE FROM meta WHERE key = 'cache';
+        DELETE FROM meta WHERE key IN (
+            'cached_portfolio',
+            'cached_chart_data',
+            'cached_delta',
+            'cached_range',
+            'cached_custom_ts',
+            'cached_currency'
+        );
     `);
 }
 
@@ -108,42 +120,46 @@ export async function insertTransactions(txns) {
 
     await db.execAsync('BEGIN;');
     try {
-        for (const t of txns) {
-            await db.runAsync(
-                `
-                    INSERT INTO transactions(
-                        date_iso,
-                        way,
-                        symbol,
-                        amount,
-                        quote_amount,
-                        quote_currency
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                `,
-                [
-                    t.dateISO,
-                    t.way,
-                    t.symbol,
-                    t.amount,
-                    t.quoteAmount ?? 0,
-                    t.quoteCurrency ?? null,
-                ]
-            );
-        }
+        await insertTransactionRows(db, txns);
+        await syncAllHoldingsWithinTransaction(db);
         await db.execAsync('COMMIT;');
-        await syncAllHoldingsFromTransactions();
     } catch (e) {
         await db.execAsync('ROLLBACK;');
         throw e;
     }
+    await clearCache();
+}
+
+export async function replaceAllTransactions(txns) {
+    debugLog('[DB][native] replaceAllTransactions:', txns.length);
+    const db = await getDb();
+
+    await db.execAsync('BEGIN;');
+    try {
+        await db.execAsync('DELETE FROM transactions;');
+        await insertTransactionRows(db, txns);
+        await syncAllHoldingsWithinTransaction(db);
+        await db.execAsync('COMMIT;');
+    } catch (e) {
+        await db.execAsync('ROLLBACK;');
+        throw e;
+    }
+    await clearCache();
 }
 
 export async function deleteTransaction(id) {
     debugLog('[DB][native] deleteTransaction:', id);
     const db = await getDb();
-    await db.runAsync(`DELETE FROM transactions WHERE id = ?`, [id]);
-    await syncAllHoldingsFromTransactions();
+    await db.execAsync('BEGIN;');
+    try {
+        await db.runAsync(`DELETE FROM transactions WHERE id = ?`, [id]);
+        await syncAllHoldingsWithinTransaction(db);
+        await db.execAsync('COMMIT;');
+    } catch (e) {
+        await db.execAsync('ROLLBACK;');
+        throw e;
+    }
+    await clearCache();
 }
 
 export async function getTransactionById(id) {
@@ -154,7 +170,9 @@ export async function getTransactionById(id) {
 export async function updateTransaction(id, t) {
     debugLog('[DB][native] updateTransaction:', id);
     const db = await getDb();
-    await db.runAsync(
+    await db.execAsync('BEGIN;');
+    try {
+        await db.runAsync(
         `
             UPDATE transactions
             SET date_iso = ?, way = ?, symbol = ?, amount = ?, quote_amount = ?, quote_currency = ?
@@ -169,8 +187,14 @@ export async function updateTransaction(id, t) {
             t.quoteCurrency ?? null,
             id
         ]
-    );
-    await syncAllHoldingsFromTransactions();
+        );
+        await syncAllHoldingsWithinTransaction(db);
+        await db.execAsync('COMMIT;');
+    } catch (e) {
+        await db.execAsync('ROLLBACK;');
+        throw e;
+    }
+    await clearCache();
 }
 
 export async function listTransactionsBySymbol(symbol) {
@@ -252,39 +276,41 @@ export async function syncHoldingsForSymbol(symbol) {
     debugLog('[DB][native] syncHoldingsForSymbol:', symbol);
     const db = await getDb();
 
+    // Calculate new quantity directly in SQL for speed
     const result = await db.getFirstAsync(
         `
             SELECT SUM(
-                CASE
+                CASE 
                     WHEN way IN ('BUY', 'DEPOSIT', 'RECEIVE') THEN amount
                     WHEN way IN ('SELL', 'WITHDRAW', 'SEND') THEN -amount
                     ELSE 0
                 END
             ) as total
-            FROM transactions
+            FROM transactions 
             WHERE symbol = ?
         `,
         [symbol]
     );
 
     const newQty = result?.total ?? 0;
-    const QUANTITY_EPSILON = 0.00000001;
 
-    if (newQty > QUANTITY_EPSILON) {
-        await db.runAsync(
-            `INSERT INTO holdings(symbol, quantity) VALUES (?, ?)
-             ON CONFLICT(symbol) DO UPDATE SET quantity = excluded.quantity`,
-            [symbol, newQty]
-        );
+    const holdings = await getHoldingsMap();
+    if (newQty <= 0) {
+        delete holdings[symbol];
     } else {
-        await db.runAsync(`DELETE FROM holdings WHERE symbol = ?`, [symbol]);
+        holdings[symbol] = newQty;
     }
-
+    await upsertHoldings(holdings);
     return newQty;
 }
 
 export async function syncAllHoldingsFromTransactions() {
     const allTxns = await getAllTransactions();
+    if (!allTxns || allTxns.length === 0) {
+        const db = await getDb();
+        await db.execAsync('DELETE FROM holdings;');
+        return {};
+    }
     const normalized = allTxns.map((t) => ({
         symbol: t.symbol,
         amount: Number(t.amount || 0),
@@ -295,39 +321,99 @@ export async function syncAllHoldingsFromTransactions() {
     return holdings;
 }
 
+async function insertTransactionRows(db, txns) {
+    for (const t of txns) {
+        await db.runAsync(
+            `
+                INSERT INTO transactions(
+                    date_iso,
+                    way,
+                    symbol,
+                    amount,
+                    quote_amount,
+                    quote_currency
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            `,
+            [
+                t.dateISO,
+                t.way,
+                t.symbol,
+                t.amount,
+                t.quoteAmount ?? 0,
+                t.quoteCurrency ?? null,
+            ]
+        );
+    }
+}
+
+async function syncAllHoldingsWithinTransaction(db) {
+    const allTxns = await db.getAllAsync(`SELECT * FROM transactions ORDER BY date_iso ASC`);
+    const holdings = computeHoldingsFromTxns(allTxns.map((t) => ({
+        symbol: t.symbol,
+        amount: Number(t.amount || 0),
+        way: String(t.way || '').toUpperCase(),
+    })));
+
+    await db.execAsync('DELETE FROM holdings;');
+    for (const [symbol, quantity] of Object.entries(holdings)) {
+        await db.runAsync(`INSERT INTO holdings(symbol, quantity) VALUES (?, ?)`, [symbol, quantity]);
+    }
+    return holdings;
+}
+
 /* ---------------- CACHE ---------------- */
 
-export async function saveCache(p, cData, d, r) {
+const CACHE_META_KEYS = [
+    'cached_portfolio',
+    'cached_chart_data',
+    'cached_delta',
+    'cached_range',
+    'cached_custom_ts',
+    'cached_currency',
+];
+
+export async function clearCache() {
+    const db = await getDb();
+    const placeholders = CACHE_META_KEYS.map(() => '?').join(', ');
+    await db.runAsync(`DELETE FROM meta WHERE key IN (${placeholders})`, CACHE_META_KEYS);
+}
+
+export async function saveCache(p, cData, d, r, currency) {
     try {
         await setMeta('cached_portfolio', JSON.stringify(p));
         await setMeta('cached_chart_data', JSON.stringify(cData));
         await setMeta('cached_delta', JSON.stringify(d));
         await setMeta('cached_range', r);
         await setMeta('cached_custom_ts', Date.now().toString());
+        await setMeta('cached_currency', String(currency || '').toUpperCase());
     } catch (e) {
-        logger.error('[DB][native] saveCache Error', e);
+        console.error('[DB][native] saveCache Error', e);
     }
 }
 
-export async function loadCache() {
+export async function loadCache(currency) {
     try {
         const pStr = await getMeta('cached_portfolio');
         const cStr = await getMeta('cached_chart_data');
         const dStr = await getMeta('cached_delta');
         const rStr = await getMeta('cached_range');
         const tsStr = await getMeta('cached_custom_ts');
+        const cachedCurrency = await getMeta('cached_currency');
+        const requestedCurrency = String(currency || '').toUpperCase();
 
-        if (pStr && cStr) {
+        if (pStr && cStr && cachedCurrency && (!requestedCurrency || cachedCurrency === requestedCurrency)) {
             return {
                 portfolio: JSON.parse(pStr),
                 chartData: JSON.parse(cStr),
                 delta: dStr ? JSON.parse(dStr) : { val: 0, pct: 0 },
                 range: rStr || '1D',
+                currency: cachedCurrency,
                 timestamp: tsStr ? Number(tsStr) : 0
             };
         }
     } catch (e) {
-        logger.error('[DB][native] loadCache Error', e);
+        console.error('[DB][native] loadCache Error', e);
     }
     return null;
 }

@@ -1,9 +1,8 @@
-/* global afterAll */
-
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
 
+// Mock dependencies
 jest.mock('expo-router', () => ({
     router: {
         push: jest.fn(),
@@ -27,8 +26,7 @@ jest.mock('../../db', () => ({
     getMeta: jest.fn().mockResolvedValue('EUR'),
     loadCache: jest.fn().mockResolvedValue(null),
     saveCache: jest.fn().mockResolvedValue(undefined),
-    clearAllData: jest.fn().mockResolvedValue(undefined),
-    insertTransactions: jest.fn().mockResolvedValue(undefined),
+    replaceAllTransactions: jest.fn().mockResolvedValue(undefined),
     upsertHoldings: jest.fn().mockResolvedValue(undefined),
     setMeta: jest.fn().mockResolvedValue(undefined),
 }));
@@ -39,7 +37,16 @@ jest.mock('../../cryptoCompare', () => ({
 
 jest.mock('../../csv', () => ({
     parseDeltaCsvToTxns: jest.fn(),
-    computeHoldingsFromTxns: jest.fn(),
+    computeHoldingsFromTxns: jest.fn((txns) => {
+        const holdings = {};
+        (txns || []).forEach(t => {
+            const sym = t.symbol;
+            if (!holdings[sym]) holdings[sym] = 0;
+            if (['BUY', 'DEPOSIT', 'RECEIVE'].includes(t.way)) holdings[sym] += Number(t.amount || 0);
+            if (['SELL', 'WITHDRAW', 'SEND'].includes(t.way)) holdings[sym] -= Number(t.amount || 0);
+        });
+        return holdings;
+    }),
 }));
 
 jest.mock('../../utils/theme', () => ({
@@ -58,6 +65,7 @@ jest.mock('../../utils/theme', () => ({
             error: '#ef4444',
             errorBg: '#ef444420',
             errorLight: '#f87171',
+            border: '#333',
             borderLight: '#333',
         },
         isDark: true,
@@ -75,35 +83,13 @@ jest.mock('../../utils/portfolioHistory', () => ({
 
 jest.mock('../../components/CoinIcon', () => {
     const React = require('react');
-    // Use string element type to avoid importing react-native which triggers Flow parsing issues
+    const { View } = require('react-native');
     return function MockCoinIcon() {
-        return React.createElement('View', { testID: 'coin-icon' });
+        return <View testID="coin-icon" />;
     };
 });
 
-jest.mock('../../components/CryptoGraph', () => {
-    const React = require('react');
-    return function MockCryptoGraph(props) {
-        const dataLen = Array.isArray(props?.data) ? props.data.length : 0;
-        return React.createElement(
-            'View',
-            { testID: 'mock-crypto-graph' },
-            React.createElement('Text', { testID: 'mock-graph-range' }, String(props?.range || '')),
-            React.createElement('Text', { testID: 'mock-graph-data-len' }, String(dataLen)),
-            React.createElement('TouchableOpacity', {
-                testID: 'mock-range-1H',
-                onPress: () => props?.onRangeChange?.('1H'),
-            }),
-            React.createElement('TouchableOpacity', {
-                testID: 'mock-range-1D',
-                onPress: () => props?.onRangeChange?.('1D'),
-            })
-        );
-    };
-});
-
-describe('HomeScreen', () => {
-    const originalDev = globalThis.__DEV__;
+describe('HomeScreen - Small Balances Toggle', () => {
     const mockPortfolio = [
         { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
         { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
@@ -112,12 +98,19 @@ describe('HomeScreen', () => {
         { symbol: 'ADA', quantity: 200, price: 0.03, value: 6, change24h: 0.8 },
     ];
 
+    const mockTransactions = [
+        { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+        { symbol: 'ETH', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
+        { symbol: 'XRP', amount: 100, way: 'BUY', date_iso: '2024-01-03' },
+        { symbol: 'DOGE', amount: 1000, way: 'BUY', date_iso: '2024-01-04' },
+        { symbol: 'ADA', amount: 200, way: 'BUY', date_iso: '2024-01-05' },
+    ];
+
     beforeEach(() => {
         jest.clearAllMocks();
-        globalThis.__DEV__ = false;
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-
+        
         db.getHoldingsMap.mockResolvedValue({
             BTC: 1,
             ETH: 10,
@@ -125,61 +118,123 @@ describe('HomeScreen', () => {
             DOGE: 1000,
             ADA: 200,
         });
-        db.getAllTransactions.mockResolvedValue([]);
+        db.getAllTransactions.mockResolvedValue(mockTransactions);
+        
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue(mockPortfolio);
     });
 
-    afterAll(() => {
-        globalThis.__DEV__ = originalDev;
-    });
-
-    it('hides assets below $10 by default and shows toggle count', async () => {
-        const { getByText, queryByText } = render(<HomeScreen />);
+    it('should only show assets >= $10 by default', async () => {
+        const { queryByText, getByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(getByText('BTC')).toBeTruthy();
             expect(getByText('ETH')).toBeTruthy();
-            expect(getByText('XRP')).toBeTruthy();
-            expect(getByText(/Show 2/i)).toBeTruthy();
-        }, { timeout: 3000 });
-
-        expect(queryByText('DOGE')).toBeNull();
-        expect(queryByText('ADA')).toBeNull();
-    });
-
-    it('expands and collapses small balances', async () => {
-        const { getByText, queryByText } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(getByText(/Show 2/i)).toBeTruthy();
+            expect(getByText('XRP')).toBeTruthy(); // $50
         });
 
-        fireEvent.press(getByText(/Show 2/i));
+        // Small balances should be hidden
+        expect(queryByText('DOGE')).toBeNull(); // $5
+        expect(queryByText('ADA')).toBeNull(); // $6
+    });
+
+    it('should show button to reveal hidden small balances', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+        });
+    });
+
+    it('should show all balances when toggle is clicked', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+        });
+
+        // Click the toggle button
+        const toggleButton = getByText(/Show 2 Small Balances/i);
+        fireEvent.press(toggleButton);
 
         await waitFor(() => {
             expect(getByText('DOGE')).toBeTruthy();
             expect(getByText('ADA')).toBeTruthy();
-            expect(getByText(/Hide/i)).toBeTruthy();
+        });
+    });
+
+    it('should change button text to "Hide Small Balances" when expanded', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
         });
 
-        fireEvent.press(getByText(/Hide/i));
+        // Click to expand
+        const toggleButton = getByText(/Show 2 Small Balances/i);
+        fireEvent.press(toggleButton);
+
+        await waitFor(() => {
+            expect(getByText('Hide Small Balances')).toBeTruthy();
+        });
+    });
+
+    it('should hide small balances again when clicking "Hide Small Balances"', async () => {
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+        });
+
+        // Expand
+        fireEvent.press(getByText(/Show 2 Small Balances/i));
+
+        await waitFor(() => {
+            expect(getByText('DOGE')).toBeTruthy();
+            expect(getByText('Hide Small Balances')).toBeTruthy();
+        });
+
+        // Collapse
+        fireEvent.press(getByText('Hide Small Balances'));
 
         await waitFor(() => {
             expect(queryByText('DOGE')).toBeNull();
             expect(queryByText('ADA')).toBeNull();
-            expect(getByText(/Show 2/i)).toBeTruthy();
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
         });
     });
 
-    it('does not show small-balance toggle when all assets are >= $10', async () => {
+    it('should still show toggle button when balances are expanded', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+        });
+
+        // Expand
+        fireEvent.press(getByText(/Show 2 Small Balances/i));
+
+        await waitFor(() => {
+            // Button should still exist, just with different text
+            expect(getByText('Hide Small Balances')).toBeTruthy();
+        });
+    });
+
+    it('should not show toggle button when there are no small balances', async () => {
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-
-        db.getHoldingsMap.mockResolvedValue({ BTC: 1, ETH: 10 });
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
+        
+        // Mock portfolio with no small balances
+        const largePortfolio = [
             { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
             { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
+        ];
+        
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1, ETH: 10 });
+        db.getAllTransactions.mockResolvedValue([
+            { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'ETH', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
         ]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue(largePortfolio);
 
         const { queryByText } = render(<HomeScreen />);
 
@@ -188,108 +243,162 @@ describe('HomeScreen', () => {
         });
     });
 
-    it('shows asset with exactly $10 and hides values below $10', async () => {
+    it('should correctly count hidden balances', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            // 2 assets under $10 (DOGE: $5, ADA: $6)
+            expect(getByText('Show 2 Small Balances')).toBeTruthy();
+        });
+    });
+
+    it('should filter balances at exactly $10 threshold', async () => {
         const db = require('../../db');
         const cryptoCompare = require('../../cryptoCompare');
-
-        db.getHoldingsMap.mockResolvedValue({ BTC: 1, EXACT: 10, BELOW: 100 });
-        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
+        
+        const portfolioWithThreshold = [
             { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
-            { symbol: 'EXACT', quantity: 10, price: 1, value: 10, change24h: 0 },
-            { symbol: 'BELOW', quantity: 100, price: 0.09, value: 9, change24h: 0 },
+            { symbol: 'EXACT', quantity: 10, price: 1, value: 10, change24h: 0 }, // Exactly $10
+            { symbol: 'BELOW', quantity: 100, price: 0.09, value: 9, change24h: 0 }, // Just below $10
+        ];
+        
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1, EXACT: 10, BELOW: 100 });
+        db.getAllTransactions.mockResolvedValue([
+            { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'EXACT', amount: 10, way: 'BUY', date_iso: '2024-01-02' },
+            { symbol: 'BELOW', amount: 100, way: 'BUY', date_iso: '2024-01-03' },
         ]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue(portfolioWithThreshold);
 
         const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(getByText('BTC')).toBeTruthy();
-            expect(getByText('EXACT')).toBeTruthy();
-            expect(queryByText('BELOW')).toBeNull();
+            expect(getByText('EXACT')).toBeTruthy(); // >= $10 should show
+            expect(queryByText('BELOW')).toBeNull(); // < $10 should hide
         });
     });
+});
 
-    it('computes graph with default range 1D on load', async () => {
+describe('HomeScreen graph ranges', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
         const history = require('../../utils/portfolioHistory');
-        history.computePortfolioHistory.mockResolvedValueOnce({
-            chartData: [{ timestamp: 1, value: 10 }, { timestamp: 2, value: 12 }],
-            delta: { val: 2, pct: 20 },
+
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
+        db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
+            { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
+        ]);
+        history.computePortfolioHistory.mockResolvedValue({
+            chartData: [],
+            delta: { val: 0, pct: 0 },
             chartColor: '#22c55e',
             coinDeltas: {},
         });
-
-        const { getByTestId } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
-                expect.objectContaining({ range: '1D' })
-            );
-        });
-
-        await waitFor(() => {
-            expect(getByTestId('mock-graph-range').props.children).toBe('1D');
-            expect(getByTestId('mock-graph-data-len').props.children).toBe('2');
-        });
     });
 
-    it('recomputes graph when switching from 1D to 1H', async () => {
+    it('recomputes graph when switching to ALL range', async () => {
         const history = require('../../utils/portfolioHistory');
-        history.computePortfolioHistory
-            .mockResolvedValueOnce({
-                chartData: [{ timestamp: 1, value: 10 }],
-                delta: { val: 0, pct: 0 },
-                chartColor: '#22c55e',
-                coinDeltas: {},
-            })
-            .mockResolvedValueOnce({
-                chartData: [{ timestamp: 1, value: 9 }, { timestamp: 2, value: 11 }],
-                delta: { val: 2, pct: 22.22 },
-                chartColor: '#22c55e',
-                coinDeltas: {},
-            });
-
-        const { getByTestId } = render(<HomeScreen />);
-
-        await waitFor(() => {
-            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
-                expect.objectContaining({ range: '1D' })
-            );
-        });
-
-        fireEvent.press(getByTestId('mock-range-1H'));
-
-        await waitFor(() => {
-            expect(history.computePortfolioHistory).toHaveBeenCalledWith(
-                expect.objectContaining({ range: '1H' })
-            );
-            expect(getByTestId('mock-graph-range').props.children).toBe('1H');
-        });
-    });
-
-    it('keeps the boot screen visible until the default 1D graph finishes loading', async () => {
-        const history = require('../../utils/portfolioHistory');
-        let resolveHistory;
-        history.computePortfolioHistory.mockImplementation(() => new Promise((resolve) => {
-            resolveHistory = resolve;
-        }));
-
         const { getByText, queryByText } = render(<HomeScreen />);
 
         await waitFor(() => {
             expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
         });
-        expect(queryByText('BTC')).toBeNull();
 
-        await act(async () => {
-            resolveHistory({
-                chartData: [{ timestamp: Date.now(), value: 50000 }],
-                delta: { val: 0, pct: 0 },
-                chartColor: '#22c55e',
-                coinDeltas: {},
-            });
-        });
+        // Verify there is no separate 24h toggle label button
+        expect(queryByText('24H CHANGE')).toBeNull();
+        expect(queryByText('All-Time')).toBeNull();
+
+        fireEvent.press(getByText('ALL'));
 
         await waitFor(() => {
-            expect(getByText('BTC')).toBeTruthy();
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: 'ALL' }));
         });
+    });
+
+    it('updates hero delta amount and percentage when selecting ranges', async () => {
+        const history = require('../../utils/portfolioHistory');
+        history.computePortfolioHistory.mockResolvedValue({
+            chartData: [{ timestamp: 1000, value: 40000 }, { timestamp: 2000, value: 50000 }],
+            delta: { val: 10000, pct: 25.0 },
+            chartColor: '#22c55e',
+            coinDeltas: {},
+        });
+
+        render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalled();
+        });
+    });
+});
+
+describe('HomeScreen saved currency', () => {
+    it('uses the saved currency for its first price fetch', async () => {
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+        db.getMeta.mockResolvedValue('USD');
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
+        db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([{ symbol: 'BTC', quantity: 1, price: 50000, value: 50000 }]);
+
+        render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(cryptoCompare.fetchPortfolioPrices).toHaveBeenCalledWith({ BTC: 1 }, 'USD');
+        });
+    });
+});
+
+describe('HomeScreen Empty State & Zero-Transaction Handling', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+
+        db.getAllTransactions.mockResolvedValue([]);
+        db.getHoldingsMap.mockResolvedValue({});
+        db.loadCache.mockResolvedValue(null);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([]);
+    });
+
+    it('should display empty state with "No data. Import CSV." when there are no transactions', async () => {
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/No data\. Import CSV\./i)).toBeTruthy();
+            expect(getByText(/Add Transaction/i)).toBeTruthy();
+        });
+
+        expect(queryByText(/Small Balances/i)).toBeNull();
+        expect(queryByText(/Total Worth/i)).toBeNull();
+        expect(queryByText(/Portfolio Allocation/i)).toBeNull();
+    });
+
+    it('should ignore stale cached portfolio when there are no transactions and stay on empty state', async () => {
+        const db = require('../../db');
+        db.loadCache.mockResolvedValue({
+            portfolio: [
+                { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
+                { symbol: 'DOGE', quantity: 1000, price: 0.005, value: 5, change24h: -0.5 }
+            ],
+            chartData: [],
+            delta: { val: 0, pct: 0 },
+            range: '1D',
+            timestamp: Date.now(),
+        });
+
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText(/No data\. Import CSV\./i)).toBeTruthy();
+        });
+
+        expect(queryByText('BTC')).toBeNull();
+        expect(queryByText('DOGE')).toBeNull();
+        expect(queryByText(/Small Balances/i)).toBeNull();
     });
 });

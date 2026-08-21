@@ -3,10 +3,13 @@ import {
     deleteTransaction,
     getAllTransactions,
     getHoldingsMap,
-    loadCache,
-    saveCache,
+    getMeta,
     getTransactionById,
     insertTransactions,
+    replaceAllTransactions,
+    loadCache,
+    saveCache,
+    setMeta,
     syncAllHoldingsFromTransactions,
     updateTransaction,
 } from '../db.web';
@@ -60,20 +63,67 @@ describe('db.web holdings sync invariants', () => {
         expect(holdings.SOL).toBeUndefined();
     });
 
-    it('persists and loads cached portfolio graph data', async () => {
-        const portfolio = [{ symbol: 'BTC', quantity: 1, price: 50000, value: 50000 }];
-        const chartData = [{ timestamp: 1700000000000, value: 50000 }];
-        const delta = { val: 1000, pct: 2 };
+    it('replaces transactions and derived holdings together', async () => {
+        await insertTransactions([
+            { dateISO: '2024-01-01T00:00:00.000Z', way: 'BUY', symbol: 'BTC', amount: 1 },
+        ]);
 
-        await saveCache(portfolio, chartData, delta, '1D');
+        await replaceAllTransactions([
+            { dateISO: '2024-01-02T00:00:00.000Z', way: 'DEPOSIT', symbol: 'ETH', amount: 2 },
+        ]);
 
-        const loaded = await loadCache();
-        expect(loaded).toEqual(expect.objectContaining({
+        const transactions = await getAllTransactions();
+        expect(transactions).toHaveLength(1);
+        expect(transactions[0]).toMatchObject({ symbol: 'ETH', amount: 2 });
+        expect(await getHoldingsMap()).toEqual({ ETH: 2 });
+    });
+});
+
+describe('db.web market cache', () => {
+    beforeEach(async () => {
+        await clearAllData();
+    });
+
+    it('round-trips the cache using the same API as the native database', async () => {
+        const portfolio = [{ symbol: 'BTC', value: 100 }];
+        const chartData = [{ timestamp: 1, value: 100 }];
+        const delta = { val: 5, pct: 5 };
+
+        await saveCache(portfolio, chartData, delta, '1D', 'EUR');
+
+        expect(await loadCache('EUR')).toEqual(expect.objectContaining({
             portfolio,
             chartData,
             delta,
             range: '1D',
+            currency: 'EUR',
+            timestamp: expect.any(Number),
         }));
-        expect(loaded.timestamp).toEqual(expect.any(Number));
+    });
+
+    it('does not return a cache created for a different currency', async () => {
+        await saveCache([{ symbol: 'BTC', value: 100 }], [], { val: 0, pct: 0 }, '1D', 'EUR');
+
+        expect(await loadCache('USD')).toBeNull();
+    });
+
+    it('invalidates cached prices when transactions change', async () => {
+        await saveCache([{ symbol: 'BTC', value: 100 }], [], { val: 0, pct: 0 }, '1D', 'EUR');
+
+        await insertTransactions([
+            { dateISO: '2024-01-01T00:00:00.000Z', way: 'BUY', symbol: 'BTC', amount: 1, quoteAmount: 100, quoteCurrency: 'EUR' },
+        ]);
+
+        expect(await loadCache('EUR')).toBeNull();
+    });
+
+    it('clears every cached value without clearing unrelated metadata', async () => {
+        await setMeta('currency', 'USD');
+        await saveCache([], [], { val: 0, pct: 0 }, '1D', 'USD');
+
+        await clearAllData();
+
+        expect(await loadCache()).toBeNull();
+        expect(await getMeta('currency')).toBe('USD');
     });
 });

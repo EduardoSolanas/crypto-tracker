@@ -1,30 +1,23 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import Feather from '@expo/vector-icons/Feather';
-import Constants from 'expo-constants';
 import { Stack, router } from 'expo-router';
+import { ArrowLeft, Check, Download, Info, RefreshCw, Upload } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
-import appJson from '../app.json';
 import { fetchPortfolioPrices } from '../src/cryptoCompare';
 import { exportTransactionsToCSV, parseDeltaCsvWithReport } from '../src/csv';
-import { clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, insertTransactions, setMeta } from '../src/db';
+import { clearCache, clearAllData, getAllTransactions, getHoldingsMap, getMeta, initDb, replaceAllTransactions, setMeta } from '../src/db';
 import i18n, { getSystemLanguage } from '../src/i18n';
 import { getCurrencyOptions } from '../src/utils/currencies';
-import { logger } from '../src/utils/logger.js';
 import { SUPPORTED_LANGUAGES } from '../src/utils/languages';
 import { useTheme } from '../src/utils/theme';
 
-const fallbackBuildNumber = appJson.expo.android?.versionCode || appJson.expo.ios?.buildNumber;
-const appVersion = Constants.nativeAppVersion || appJson.expo.version;
-const appBuildNumber = Constants.nativeBuildVersion || (fallbackBuildNumber ? String(fallbackBuildNumber) : '');
-const displayVersion = appBuildNumber ? `v${appVersion} (${appBuildNumber})` : `v${appVersion}`;
-
 export default function SettingsScreen() {
-    const { colors } = useTheme();
+    const [themeMode, setThemeMode] = useState('system');
+    const { colors } = useTheme(themeMode);
     const { t } = useTranslation();
     const tr = (key, fallback, options) => {
         const value = t(key, options);
@@ -32,10 +25,11 @@ export default function SettingsScreen() {
         if (value === key || value.endsWith(key)) return fallback;
         return value;
     };
+
     const [currency, setCurrency] = useState('EUR');
     const [language, setLanguage] = useState('system');
     const [loading, setLoading] = useState(true);
-    const [importProgress, setImportProgress] = useState(null); // { current, total, stage }
+    const [importProgress, setImportProgress] = useState(null);
     const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
     const [currencySearch, setCurrencySearch] = useState('');
 
@@ -50,36 +44,52 @@ export default function SettingsScreen() {
         );
     }, [currencyOptions, currencySearch]);
 
-    useEffect(() => {
-        let isMounted = true;
+    const loadSettings = async () => {
+        try {
+            await initDb();
+            const c = await getMeta('currency');
+            if (c) setCurrency(c);
 
-        async function loadSettings() {
-            try {
-                await initDb();
-                const c = await getMeta('currency');
-                if (isMounted && c) setCurrency(c);
+            const savedTheme = await getMeta('theme');
+            if (savedTheme) setThemeMode(savedTheme);
 
-                const savedLanguage = await getMeta('language');
-                const nextLanguage = savedLanguage || 'system';
-                if (isMounted) setLanguage(nextLanguage);
+            const savedLanguage = await getMeta('language');
+            const nextLanguage = savedLanguage || 'system';
+            setLanguage(nextLanguage);
 
-                const resolvedLanguage = nextLanguage === 'system' ? getSystemLanguage() : nextLanguage;
-                await i18n.changeLanguage(resolvedLanguage);
-            } catch (e) {
-                logger.error('[Settings] load error:', e);
-            } finally {
-                if (isMounted) setLoading(false);
+            const resolvedLanguage = nextLanguage === 'system' ? getSystemLanguage() : nextLanguage;
+            await i18n.changeLanguage(resolvedLanguage);
+        } catch (e) {
+            if (globalThis.__DEV__) {
+                console.error(e);
             }
+        } finally {
+            setLoading(false);
         }
+    };
 
-        loadSettings();
-        return () => { isMounted = false; };
+    useEffect(() => {
+        let active = true;
+        queueMicrotask(() => {
+            if (active) loadSettings();
+        });
+        return () => { active = false; };
     }, []);
+
+    const handleSelectTheme = async (mode) => {
+        try {
+            setThemeMode(mode);
+            await setMeta('theme', mode);
+        } catch (_e) {
+            Alert.alert(tr('general.error', 'Error'), tr('settings.failedToSave', 'Failed to save settings'));
+        }
+    };
 
     const handleSelectCurrency = async (code) => {
         try {
             setCurrency(code);
             await setMeta('currency', code);
+            await clearCache();
             setIsCurrencyModalVisible(false);
             setCurrencySearch('');
         } catch (_e) {
@@ -98,6 +108,30 @@ export default function SettingsScreen() {
         }
     };
 
+    const handleClearCache = async () => {
+        Alert.alert(
+            tr('settings.clearCacheConfirmTitle', 'Clear Cache'),
+            tr('settings.clearCacheConfirmMessage', 'This will purge temporary market prices and charts, and fetch fresh data. Your transactions are safe.'),
+            [
+                { text: tr('general.cancel', 'Cancel'), style: 'cancel' },
+                {
+                    text: tr('general.ok', 'OK'),
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+                            await clearCache();
+                            Alert.alert(tr('general.ok', 'OK'), tr('settings.clearCacheSuccess', 'Price cache cleared successfully'));
+                        } catch (e) {
+                            Alert.alert(tr('general.error', 'Error'), e?.message || String(e));
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const handleImportTransactions = async () => {
         try {
             const result = await DocumentPicker.getDocumentAsync({
@@ -110,12 +144,12 @@ export default function SettingsScreen() {
             const asset = result.assets[0];
 
             try {
-                setImportProgress({ current: 0, total: 4, stage: tr('settings.readingCsv', 'Reading CSV file...') });
+                setImportProgress({ current: 0, total: 3, stage: tr('settings.readingCsv', 'Reading CSV file...') });
 
                 const response = await fetch(asset.uri);
                 const text = await response.text();
 
-                setImportProgress({ current: 1, total: 4, stage: tr('settings.parsingTransactions', 'Parsing transactions...') });
+                setImportProgress({ current: 1, total: 3, stage: tr('settings.parsingTransactions', 'Parsing transactions...') });
                 const { txns, report } = parseDeltaCsvWithReport(text);
                 if (!txns.length) {
                     setImportProgress(null);
@@ -137,14 +171,11 @@ export default function SettingsScreen() {
                             style: 'destructive',
                             onPress: async () => {
                                 try {
-                                    setImportProgress({ current: 2, total: 4, stage: tr('settings.clearingOldData', 'Clearing old data...') });
-                                    await clearAllData();
-
-                                    setImportProgress({ current: 3, total: 4, stage: tr('settings.savingTransactions', `Saving ${txns.length} transactions...`, { count: txns.length }) });
-                                    await insertTransactions(txns);
+                                    setImportProgress({ current: 2, total: 3, stage: tr('settings.savingTransactions', `Saving ${txns.length} transactions...`, { count: txns.length }) });
+                                    await replaceAllTransactions(txns);
                                     const holdings = await getHoldingsMap();
 
-                                    setImportProgress({ current: 4, total: 4, stage: tr('settings.fetchingLatestPrices', 'Fetching latest prices...') });
+                                    setImportProgress({ current: 3, total: 3, stage: tr('settings.fetchingLatestPrices', 'Fetching latest prices...') });
                                     const currentCurrency = await getMeta('currency') || currency;
                                     await fetchPortfolioPrices(holdings, currentCurrency);
 
@@ -237,7 +268,7 @@ export default function SettingsScreen() {
             }
         } catch (e) {
             if (globalThis.__DEV__) {
-                logger.error('Export error:', e);
+                console.error('Export error:', e);
             }
             Alert.alert(tr('settings.exportError', 'Export error'), e?.message ?? String(e));
         } finally {
@@ -277,96 +308,168 @@ export default function SettingsScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Feather name="arrow-left" color={colors.text} size={24} />
+                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
+                    <ArrowLeft color={colors.text} size={24} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: colors.text }]}>{tr('settings.title', 'Settings')}</Text>
-                <Text style={[styles.versionText, { color: colors.textSecondary }]}>
-                    {displayVersion}
-                </Text>
             </View>
 
-            <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{tr('settings.defaultCurrency', 'Default Currency')}</Text>
-                <View style={[styles.card, { backgroundColor: colors.surface }]}>
-                    <TouchableOpacity
-                        style={styles.row}
-                        onPress={() => setIsCurrencyModalVisible(true)}
-                    >
-                        <View>
-                            <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.selectCurrency', 'Select Currency')}</Text>
-                            <Text style={{ color: colors.textSecondary, marginTop: 4 }}>
-                                {tr('settings.selectedCurrency', `Selected: ${currency}`, { currency })}
+            <FlatList
+                data={[1]}
+                keyExtractor={() => 'settings-content'}
+                contentContainerStyle={{ paddingBottom: 40 }}
+                renderItem={() => (
+                    <>
+                        {/* Currency Section */}
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                {tr('settings.defaultCurrency', 'Default Currency')}
                             </Text>
+                            <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                                <TouchableOpacity
+                                    style={styles.row}
+                                    onPress={() => setIsCurrencyModalVisible(true)}
+                                >
+                                    <View>
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.selectCurrency', 'Select Currency')}</Text>
+                                        <Text style={{ color: colors.textSecondary, marginTop: 4 }}>
+                                            {tr('settings.selectedCurrency', `Selected: ${currency}`, { currency })}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
                         </View>
-                    </TouchableOpacity>
-                </View>
-            </View>
 
-            <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{tr('settings.language', 'Language')}</Text>
-                <View style={[styles.card, { backgroundColor: colors.surface }]}>
-                    {SUPPORTED_LANGUAGES.map((lang, index) => (
+                        {/* Theme Section */}
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                {tr('settings.theme', 'Appearance & Theme')}
+                            </Text>
+                            <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                                {[
+                                    { key: 'system', label: tr('settings.themeSystem', 'System Default') },
+                                    { key: 'dark', label: tr('settings.themeDark', 'Dark Mode') },
+                                    { key: 'light', label: tr('settings.themeLight', 'Light Mode') }
+                                ].map((tItem, index) => (
+                                    <TouchableOpacity
+                                        key={tItem.key}
+                                        style={[
+                                            styles.row,
+                                            index !== 2 && { ...styles.borderBottom, borderBottomColor: colors.borderLight }
+                                        ]}
+                                        onPress={() => handleSelectTheme(tItem.key)}
+                                    >
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tItem.label}</Text>
+                                        {themeMode === tItem.key && <Check color={colors.success} size={20} />}
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        {/* Language Section */}
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                {tr('settings.language', 'Language')}
+                            </Text>
+                            <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                                {SUPPORTED_LANGUAGES.map((lang, index) => (
+                                    <TouchableOpacity
+                                        key={lang.code}
+                                        style={[
+                                            styles.row,
+                                            index !== SUPPORTED_LANGUAGES.length - 1 && { ...styles.borderBottom, borderBottomColor: colors.borderLight }
+                                        ]}
+                                        onPress={() => handleSelectLanguage(lang.code)}
+                                    >
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{lang.label}</Text>
+                                        {language === lang.code && <Check color={colors.success} size={20} />}
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        {/* Data Management */}
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                {tr('settings.dataManagement', 'Data Management')}
+                            </Text>
+                            <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                                <TouchableOpacity
+                                    style={[styles.row, { ...styles.borderBottom, borderBottomColor: colors.borderLight }]}
+                                    onPress={handleImportTransactions}
+                                    disabled={loading}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Upload size={20} color={colors.text} style={{ marginRight: 12 }} />
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.importCsv', 'Import CSV')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.row, { ...styles.borderBottom, borderBottomColor: colors.borderLight }]}
+                                    onPress={handleExportTransactions}
+                                    disabled={loading}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Download size={20} color={colors.text} style={{ marginRight: 12 }} />
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.exportCsv', 'Export CSV')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.row}
+                                    onPress={handleClearCache}
+                                    disabled={loading}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <RefreshCw size={20} color={colors.text} style={{ marginRight: 12 }} />
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.clearCache', 'Clear Price Cache')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        {/* App Info */}
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                {tr('settings.appInfo', 'App Information')}
+                            </Text>
+                            <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                                <View style={styles.row}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Info size={20} color={colors.textSecondary} style={{ marginRight: 12 }} />
+                                        <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.version', 'Version')}</Text>
+                                    </View>
+                                    <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>1.0.0 (Build 57)</Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Reset All Data Button */}
                         <TouchableOpacity
-                            key={lang.code}
-                            style={[
-                                styles.row,
-                                index !== SUPPORTED_LANGUAGES.length - 1 && { ...styles.borderBottom, borderBottomColor: colors.borderLight }
-                            ]}
-                            onPress={() => handleSelectLanguage(lang.code)}
+                            style={[styles.resetBtn, { backgroundColor: colors.errorBg, borderColor: colors.error }]}
+                            onPress={handleResetData}
+                            disabled={loading}
                         >
-                            <Text style={[styles.rowText, { color: colors.text }]}>{lang.label}</Text>
-                            {language === lang.code && <Feather name="check" color="#22c55e" size={20} />}
+                            <Text style={[styles.resetText, { color: colors.error }]}>
+                                {tr('settings.resetAllData', 'Reset All Data')}
+                            </Text>
                         </TouchableOpacity>
-                    ))}
-                </View>
-            </View>
+                    </>
+                )}
+            />
 
-            <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{tr('settings.dataManagement', 'Data Management')}</Text>
-                <View style={[styles.card, { backgroundColor: colors.surface }]}>
-                    <TouchableOpacity
-                        style={[styles.row, { ...styles.borderBottom, borderBottomColor: colors.borderLight }]}
-                        onPress={handleImportTransactions}
-                        disabled={loading}
-                    >
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Feather name="upload" size={20} color={colors.text} style={{ marginRight: 12 }} />
-                            <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.importCsv', 'Import CSV')}</Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.row}
-                        onPress={handleExportTransactions}
-                        disabled={loading}
-                    >
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Feather name="download" size={20} color={colors.text} style={{ marginRight: 12 }} />
-                            <Text style={[styles.rowText, { color: colors.text }]}>{tr('settings.exportCsv', 'Export CSV')}</Text>
-                        </View>
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            <TouchableOpacity
-                style={styles.resetBtn}
-                onPress={handleResetData}
-                disabled={loading}
-            >
-                <Text style={styles.resetText}>{tr('settings.resetAllData', 'Reset All Data')}</Text>
-            </TouchableOpacity>
-
+            {/* Currency Selection Modal */}
             <Modal visible={isCurrencyModalVisible} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.currencyModalContent, { backgroundColor: colors.surface }]}> 
+                    <View style={[styles.currencyModalContent, { backgroundColor: colors.surface }]}>
                         <Text style={[styles.modalTitle, { color: colors.text }]}>{tr('settings.selectCurrency', 'Select Currency')}</Text>
                         <TextInput
                             value={currencySearch}
                             onChangeText={setCurrencySearch}
                             placeholder={tr('settings.searchCurrencyPlaceholder', 'Search currency code or name')}
                             placeholderTextColor={colors.textSecondary}
-                            style={[styles.searchInput, { color: colors.text, borderColor: colors.border }]}
+                            style={[styles.searchInput, { color: colors.text, borderColor: colors.borderLight, backgroundColor: colors.surfaceElevated }]}
                         />
 
                         <FlatList
@@ -381,7 +484,7 @@ export default function SettingsScreen() {
                                         <Text style={[styles.rowText, { color: colors.text }]}>{item.code}</Text>
                                         <Text style={{ color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>{item.name}</Text>
                                     </View>
-                                    {currency === item.code && <Feather name="check" color="#22c55e" size={20} />}
+                                    {currency === item.code && <Check color={colors.success} size={20} />}
                                 </TouchableOpacity>
                             )}
                             ListEmptyComponent={
@@ -402,6 +505,7 @@ export default function SettingsScreen() {
                 </View>
             </Modal>
 
+            {/* Import Progress Modal */}
             <Modal
                 visible={!!importProgress}
                 transparent
@@ -434,21 +538,19 @@ export default function SettingsScreen() {
                     </View>
                 </View>
             </Modal>
-
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1, padding: 16 },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, paddingVertical: 12 },
+    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingVertical: 12 },
     backBtn: { padding: 8, marginRight: 8 },
-    title: { fontSize: 24, fontWeight: 'bold', flex: 1 },
-    versionText: { fontSize: 12, fontWeight: '500' },
+    title: { fontSize: 24, fontWeight: 'bold' },
 
-    // ...existing code...
-    sectionTitle: { fontSize: 14, marginBottom: 12, fontWeight: '600' },
-    card: { borderRadius: 12 },
+    section: { marginBottom: 22 },
+    sectionTitle: { fontSize: 13, marginBottom: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+    card: { borderRadius: 14, overflow: 'hidden' },
 
     row: {
         flexDirection: 'row',
@@ -457,21 +559,21 @@ const styles = StyleSheet.create({
         padding: 16
     },
     borderBottom: { borderBottomWidth: 1 },
-    rowText: { fontSize: 16, fontWeight: '500' },
+    rowText: { fontSize: 15, fontWeight: '600' },
 
     resetBtn: {
-        marginTop: 'auto',
+        marginTop: 10,
         marginBottom: 24,
         padding: 16,
-        backgroundColor: '#332222',
-        borderRadius: 12,
-        alignItems: 'center'
+        borderRadius: 14,
+        alignItems: 'center',
+        borderWidth: 1,
     },
-    resetText: { color: '#ef4444', fontWeight: 'bold' },
+    resetText: { fontWeight: '700', fontSize: 15 },
 
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
         justifyContent: 'center',
         alignItems: 'center',
         padding: 20
@@ -484,8 +586,8 @@ const styles = StyleSheet.create({
         alignItems: 'center'
     },
     modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
+        fontSize: 18,
+        fontWeight: '700',
         marginBottom: 12
     },
     modalStage: {
@@ -506,35 +608,35 @@ const styles = StyleSheet.create({
     },
     progressText: {
         fontSize: 12,
-        fontWeight: '500'
+        fontWeight: '600'
     },
 
     currencyModalContent: {
         width: '100%',
         maxWidth: 500,
         maxHeight: '85%',
-        padding: 16,
+        padding: 18,
         borderRadius: 16
     },
     searchInput: {
         borderWidth: 1,
         borderRadius: 10,
-        paddingHorizontal: 12,
+        paddingHorizontal: 14,
         paddingVertical: 10,
-        marginBottom: 10,
+        marginBottom: 12,
+        fontSize: 15,
     },
     currencyRow: {
         borderBottomWidth: 1,
     },
     emptyText: {
-        padding: 20,
+        padding: 24,
         textAlign: 'center'
     },
     closeBtn: {
-        marginTop: 12,
-        borderRadius: 10,
+        marginTop: 14,
+        borderRadius: 12,
         alignItems: 'center',
-        padding: 12,
+        padding: 14,
     }
 });
-

@@ -9,48 +9,48 @@ describe('coinChartRange', () => {
         it('maps to minute candles for one hour', () => {
             expect(getCoinChartFetchParams('1H')).toEqual({
                 timeframe: 'minute',
-                limit: 12,
-                aggregate: 5,
+                limit: 60,
+                aggregate: 1,
             });
         });
     });
 
     describe('1D mode agent', () => {
-        it('maps to hourly candles with 1-hour buckets', () => {
+        it('maps to minute candles with 12-minute buckets', () => {
             expect(getCoinChartFetchParams('1D')).toEqual({
-                timeframe: 'hour',
-                limit: 24,
-                aggregate: 1,
+                timeframe: 'minute',
+                limit: 120,
+                aggregate: 12,
             });
         });
     });
 
     describe('1W mode agent', () => {
-        it('maps to hourly candles with 4-hour aggregation', () => {
+        it('maps to hourly candles with 2-hour aggregation', () => {
             expect(getCoinChartFetchParams('1W')).toEqual({
                 timeframe: 'hour',
-                limit: 42,
-                aggregate: 4,
+                limit: 84,
+                aggregate: 2,
             });
         });
     });
 
     describe('1M mode agent', () => {
-        it('maps to daily candles for one month', () => {
+        it('maps to hourly candles with 6-hour aggregation', () => {
             expect(getCoinChartFetchParams('1M')).toEqual({
-                timeframe: 'day',
-                limit: 30,
-                aggregate: 1,
+                timeframe: 'hour',
+                limit: 120,
+                aggregate: 6,
             });
         });
     });
 
     describe('1Y mode agent', () => {
-        it('maps to daily candles for one year with 3-day aggregation', () => {
+        it('maps to daily candles for one year', () => {
             expect(getCoinChartFetchParams('1Y')).toEqual({
                 timeframe: 'day',
-                limit: 122,
-                aggregate: 3,
+                limit: 365,
+                aggregate: 1,
             });
         });
     });
@@ -59,29 +59,28 @@ describe('coinChartRange', () => {
         it('maps to long-range daily candles with aggregation', () => {
             expect(getCoinChartFetchParams('ALL')).toEqual({
                 timeframe: 'day',
-                limit: 100,
-                aggregate: 7,
+                limit: 200,
+                aggregate: 5,
             });
         });
 
         it('expands dynamically from earliest transaction time', () => {
             const nowMs = new Date('2026-02-28T00:00:00.000Z').getTime();
             const earliestTxMs = new Date('2022-01-01T00:00:00.000Z').getTime();
-            // Days = ~1519. Target 100 pts. Agg = ceil(1519/100) = 16. Limit = ceil(1519/16) = 95.
 
             expect(getCoinChartFetchParams('ALL', { earliestTxMs, nowMs })).toEqual({
                 timeframe: 'day',
-                limit: 95,
-                aggregate: 16,
+                limit: 190,
+                aggregate: 8,
             });
         });
     });
 
     it('falls back to 1D mapping for unknown ranges', () => {
         expect(getCoinChartFetchParams('UNKNOWN')).toEqual({
-            timeframe: 'hour',
-            limit: 24,
-            aggregate: 1,
+            timeframe: 'minute',
+            limit: 120,
+            aggregate: 12,
         });
     });
 });

@@ -1,0 +1,57 @@
+name: EAS OTA Update
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "EAS update branch/channel"
+        required: true
+        default: "production"
+      message:
+        description: "Update message"
+        required: false
+        default: "Automated OTA update"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish OTA update
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          if [ -z "$CHANNEL" ]; then CHANNEL="production"; fi
+
+          MESSAGE="${{ github.event.inputs.message }}"
+          if [ -z "$MESSAGE" ]; then
+            MESSAGE="OTA update from ${GITHUB_SHA::7}"
+          fi
+
+          npx eas-cli update \
+            --branch "$CHANNEL" \
+            --message "$MESSAGE" \
+            --non-interactive

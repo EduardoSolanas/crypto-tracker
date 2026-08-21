@@ -17,18 +17,21 @@ const parseCSVLine = (text, delimiter = ',') => {
     return result;
 };
 
-const extractSymbol = (currencyStr) => {
+export const extractSymbol = (currencyStr) => {
     if (!currencyStr) return null;
     const str = currencyStr.trim();
     const match = str.match(/\((.*?)\)/);
+    let sym = '';
     if (match) {
         const contentInParens = match[1];
         const contentOutside = str.split('(')[0].trim();
-        return (contentOutside.length > 0 && contentOutside.length <= 5)
-            ? contentOutside.toUpperCase()
-            : contentInParens.toUpperCase();
+        sym = (contentOutside.length > 0 && contentOutside.length <= 5)
+            ? contentOutside
+            : contentInParens;
+    } else {
+        sym = str.split(' ')[0];
     }
-    return str.split(' ')[0].toUpperCase();
+    return sym.replace(/[*#@!]/g, '').trim().toUpperCase();
 };
 
 function parseDateToUtcIso(dateRaw) {
@@ -40,7 +43,7 @@ function parseDateToUtcIso(dateRaw) {
         const year = Number(dateOnly[1]);
         const month = Number(dateOnly[2]);
         const day = Number(dateOnly[3]);
-        return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).toISOString();
+        return toValidatedUtcIso(year, month, day, 0, 0, 0);
     }
 
     const naiveDateTime = raw.match(
@@ -53,7 +56,16 @@ function parseDateToUtcIso(dateRaw) {
         const hour = Number(naiveDateTime[4]);
         const minute = Number(naiveDateTime[5]);
         const second = Number(naiveDateTime[6] || 0);
-        return new Date(Date.UTC(year, month - 1, day, hour, minute, second)).toISOString();
+        return toValidatedUtcIso(year, month, day, hour, minute, second);
+    }
+
+    const datePrefix = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (datePrefix && !isValidCalendarDate(
+        Number(datePrefix[1]),
+        Number(datePrefix[2]),
+        Number(datePrefix[3])
+    )) {
+        return null;
     }
 
     const parsed = new Date(raw);
@@ -62,6 +74,39 @@ function parseDateToUtcIso(dateRaw) {
     }
 
     return null;
+}
+
+function toValidatedUtcIso(year, month, day, hour, minute, second) {
+    if (
+        !Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) ||
+        !Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second)
+    ) {
+        return null;
+    }
+
+    if (!isValidCalendarDate(year, month, day)) return null;
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    if (
+        date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 ||
+        date.getUTCDate() !== day || date.getUTCHours() !== hour ||
+        date.getUTCMinutes() !== minute || date.getUTCSeconds() !== second
+    ) {
+        return null;
+    }
+    return date.toISOString();
+}
+
+function isValidCalendarDate(year, month, day) {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function parsePositiveFiniteNumber(raw) {
+    const text = String(raw ?? '').trim();
+    if (!/^(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
+    const value = Number(text);
+    return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 const SKIP_REASONS = {
@@ -175,8 +220,14 @@ export function parseDeltaCsvWithReport(csvText) {
             continue;
         }
 
-        const amount = parseFloat(rawAmount);
-        if (Number.isNaN(amount)) {
+        const numericAmount = Number(rawAmount);
+        if (Number.isFinite(numericAmount) && numericAmount === 0) {
+            report.zeroAmountSync = (report.zeroAmountSync || 0) + 1;
+            continue;
+        }
+
+        const amount = parsePositiveFiniteNumber(rawAmount);
+        if (amount === null) {
             report.skipped += 1;
             report.reasons[SKIP_REASONS.INVALID_AMOUNT] += 1;
             continue;

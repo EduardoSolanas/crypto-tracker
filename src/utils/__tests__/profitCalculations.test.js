@@ -3,7 +3,7 @@
  * Tests CSV parsing, holdings computation, and per-asset performance
  */
 
-import { computeHoldingsFromTxns, parseDeltaCsvToTxns } from '../../csv';
+import { computeHoldingsFromTxns, parseDeltaCsvToTxns, parseDeltaCsvWithReport } from '../../csv';
 import { computePortfolioHistory } from '../portfolioHistory';
 
 describe('Transaction Processing & Profit Calculations', () => {
@@ -83,14 +83,31 @@ data,data,data`;
             expect(() => parseDeltaCsvToTxns(csv)).toThrow("Invalid CSV format");
         });
 
-        it('handles negative amounts (should be treated as positive)', () => {
+        it('skips zero, negative, non-finite, and malformed amounts', () => {
             const csv = `Date,Way,Base amount,Base currency,Quote amount,Quote currency
-2024-01-15 10:00:00,BUY,-1.5,BTC,45000,USD`;
+2024-01-15 10:00:00,BUY,0,BTC,45000,USD
+2024-01-15 10:00:00,BUY,-1.5,BTC,45000,USD
+2024-01-15 10:00:00,BUY,Infinity,BTC,45000,USD
+2024-01-15 10:00:00,BUY,1BTC,BTC,45000,USD`;
 
-            const txns = parseDeltaCsvToTxns(csv);
+            const { txns, report } = parseDeltaCsvWithReport(csv);
+
+            expect(txns).toHaveLength(0);
+            expect(report.zeroAmountSync).toBe(1);
+            expect(report.reasons.invalid_amount).toBe(3);
+        });
+
+        it('skips impossible calendar dates instead of normalizing them', () => {
+            const csv = `Date,Way,Base amount,Base currency,Quote amount,Quote currency
+2024-02-30 10:00:00,BUY,1,BTC,45000,USD
+2024-02-29 25:00:00,BUY,1,BTC,45000,USD
+2024-02-29 10:00:00,BUY,1,BTC,45000,USD`;
+
+            const { txns, report } = parseDeltaCsvWithReport(csv);
 
             expect(txns).toHaveLength(1);
-            expect(txns[0].amount).toBe(-1.5); // Preserved as-is, logic handles in computeHoldings
+            expect(txns[0].dateISO).toBe('2024-02-29T10:00:00.000Z');
+            expect(report.reasons.invalid_date).toBe(2);
         });
     });
 
@@ -570,9 +587,8 @@ data,data,data`;
                 fetchCandles: mockFetchCandles
             });
 
-            // Delta should be calculated from the first active sampled point to the live portfolio value.
-            expect(result.delta.val).toBeGreaterThan(4900);
-            expect(result.delta.val).toBeLessThan(5100);
+            // Delta should be calculated from first point with value
+            expect(result.delta.val).toBeGreaterThan(5000);
         });
 
         it('handles assets with very small quantities', async () => {

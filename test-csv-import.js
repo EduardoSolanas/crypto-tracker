@@ -8,6 +8,7 @@
  */
 
 const fs = require('fs');
+const path = require('path');
 
 // Read your CSV file
 const csvPath = process.argv[2] || './test.csv';

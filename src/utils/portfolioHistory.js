@@ -1,29 +1,8 @@
 import { toLinePoint } from './chartContracts';
-import { RANGE_CONFIGS } from './coinChartRange';
-import { logger } from './logger.js';
 
 // Named constants for magic numbers
 const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
 const MIN_QUANTITY = 0.00000001;  // Dust threshold for filtering tiny amounts
-
-const getInterpolatedClose = (history, pointer, timestampSec) => {
-    const current = history[pointer];
-    if (!current) return 0;
-
-    const currentClose = Number(current.close || 0);
-    const next = history[pointer + 1];
-    if (!next || timestampSec <= current.time) return currentClose;
-
-    const nextClose = Number(next.close || 0);
-    const currentTime = Number(current.time || 0);
-    const nextTime = Number(next.time || 0);
-    if (!Number.isFinite(currentClose) || !Number.isFinite(nextClose) || nextTime <= currentTime) {
-        return currentClose;
-    }
-
-    const progress = Math.min(Math.max((timestampSec - currentTime) / (nextTime - currentTime), 0), 1);
-    return currentClose + (nextClose - currentClose) * progress;
-};
 
 export const computePortfolioHistory = async ({
     allTxns,
@@ -69,28 +48,47 @@ export const computePortfolioHistory = async ({
     let rTimeframe = 'day';
     let rAggregate = 1;
     
-    // Target ~100-150 points max for the fetch to keep payload light.
-    // The graph simulation simulates ~50-84 points.
-
-    const config = RANGE_CONFIGS[range] || RANGE_CONFIGS['1D'];
-    rTimeframe = config.timeframe;
-    rLimit = config.limit;
-    rAggregate = config.aggregate;
-
-    // Special case override for ALL calculation logic (dynamic based on earliestTxnTime)
-    if (range === 'ALL' && earliestTxnTime > 0) {
-        // Calculate days since first transaction
-        const daysSinceFirst = Math.ceil((nowSec - earliestTxnTime) / 86400);
-        rTimeframe = 'day';
-        const duration = Math.max(daysSinceFirst, 30);
-
-        // Target ~150 points for the full history
-        rAggregate = Math.max(1, Math.ceil(duration / 150));
-        // Ensure we fetch enough candles to cover the duration
-        rLimit = Math.ceil(duration / rAggregate);
-
-        // Cap at API limit (2000) though we shouldn't hit it with agg logic
-        rLimit = Math.min(rLimit, 2000);
+    switch (range) {
+        case '1H': 
+            // 1h should use minute candles; hourly candles make this view stale/inaccurate.
+            rTimeframe = 'minute'; 
+            rLimit = 60;
+            rAggregate = 1;
+            break;
+        case '1D': 
+            rTimeframe = 'hour'; 
+            rLimit = 24; 
+            rAggregate = 1;
+            break;
+        case '1W': 
+            rTimeframe = 'hour'; 
+            // 7 days * 24h = 168h.
+            rLimit = 168;
+            rAggregate = 1;
+            break;
+        case '1M': 
+            rTimeframe = 'day'; 
+            rLimit = 30; 
+            rAggregate = 1;
+            break;
+        case '1Y': 
+            rTimeframe = 'day'; 
+            rLimit = 365; 
+            rAggregate = 1;
+            break;
+        case 'ALL': {
+            // Calculate days since first transaction
+            const daysSinceFirst = Math.ceil((nowSec - earliestTxnTime) / 86400);
+            rTimeframe = 'day';
+            // Use at least 30 days, cap at 2000 (API limit)
+            rLimit = Math.min(Math.max(daysSinceFirst, 30), 2000);
+            rAggregate = Math.max(1, Math.ceil(rLimit / 200));
+            break;
+        }
+        default: 
+            rTimeframe = 'day'; 
+            rLimit = 30;
+            rAggregate = 1;
     }
 
     let stepSeconds = 86400;
@@ -100,20 +98,40 @@ export const computePortfolioHistory = async ({
 
     const gridNow = Math.floor(nowSec / stepSeconds) * stepSeconds;
 
-    // Simulation uses the same step/limit as the fetch configuration
-    // (since we optimized the fetch configuration to match display density)
+    // For 1H view, we want hourly data points but only show the last hour
     let simStep = stepSeconds;
     let simLimit = rLimit;
+    
+    if (range === '1H') {
+        // Show 12 data points over the last hour (5-minute intervals).
+        simLimit = 12;
+        simStep = 300; // 5 minute intervals for display
+    }
+    if (range === '1W') {
+        // Keep chart readable while still spanning the full week.
+        simStep = 7200; // 2-hour intervals
+        simLimit = 84;  // 7 days * 12 points/day
+    }
 
+    // For ALL and 1Y, sample data points to avoid too many
+    if (range === 'ALL' || range === '1Y') {
+        const targetPoints = 50;
+        if (rLimit > targetPoints) {
+            simStep = Math.floor((rLimit * 86400) / targetPoints);
+            simLimit = targetPoints;
+        }
+    }
 
     let timePoints = [];
     for (let i = simLimit; i >= 0; i--) {
         const ts = gridNow - (i * simStep);
         if (ts <= nowSec) timePoints.push(ts);
     }
-    if (nowSec - timePoints[timePoints.length - 1] > 1) timePoints.push(nowSec);
+    if (timePoints.length === 0 || nowSec > timePoints[timePoints.length - 1]) {
+        timePoints.push(nowSec);
+    }
 
-    // --- 2. FETCH HISTORY FOR EACH COIN ---
+    // --- 2. FETCH HISTORY ---
     const historyMap = {};
     const symbolsToFetch = Array.from(significantSymbols);
 
@@ -126,7 +144,9 @@ export const computePortfolioHistory = async ({
                     historyMap[sym] = data || [];
                 } catch (err) {
                     historyMap[sym] = [];
-                    logger.error(`Error fetching history for ${sym}:`, err);
+                    if (globalThis.__DEV__) {
+                        console.error(`Error fetching history for ${sym}:`, err);
+                    }
                 }
             })
         );
@@ -168,20 +188,15 @@ export const computePortfolioHistory = async ({
             }
             historyPointers[sym] = ptr;
 
-            val += qty * getInterpolatedClose(hist, ptr, tPoint);
+            // If data is too old compared to point, maybe use it anyway if it's the last known price?
+            // Existing logic uses it if within simStep.
+            // Let's stick to existing logic for now.
+            if (hist[ptr].time <= tPoint + simStep) {
+                val += qty * hist[ptr].close;
+            }
         }
         return toLinePoint(tPoint * 1000, val);
     });
-
-    const currentIncludedValue = currentPortfolio?.reduce((total, item) => {
-        if (!significantSymbols.has(item.symbol)) return total;
-        return total + Number(item.value || 0);
-    }, 0) || 0;
-
-    if (currentIncludedValue > 0 && graphPoints.length > 0) {
-        const lastIndex = graphPoints.length - 1;
-        graphPoints[lastIndex] = toLinePoint(graphPoints[lastIndex].timestamp, currentIncludedValue);
-    }
 
     // --- 4. POST-PROCESS ---
     const firstActiveIndex = graphPoints.findIndex(p => p.value > 0.0001);
@@ -208,9 +223,7 @@ export const computePortfolioHistory = async ({
     const getAssetPerformance = (item, history, r, rangeStart) => {
         const { price, quantity, change24h } = item;
         if (r === '1D') {
-            const factor = 1 + (change24h / 100);
-            // Guard: factor ≤ 0 means change24h ≤ -100%, which would give Infinity or negative start price.
-            const startPrice = factor > 0 ? price / factor : 0;
+            const startPrice = price / (1 + (change24h / 100));
             return { val: (price - startPrice) * quantity, pct: change24h };
         }
         if (!history || history.length === 0) return { val: 0, pct: 0 };

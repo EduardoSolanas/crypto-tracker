@@ -1,6 +1,6 @@
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
 import * as Localization from 'expo-localization';
+import i18next from 'i18next';
+import { initReactI18next } from 'react-i18next';
 
 import de from './locales/de/common.json';
 import en from './locales/en/common.json';
@@ -19,18 +19,15 @@ const resources = {
 const supportedLanguages = Object.keys(resources);
 
 function resolveDeviceLanguage() {
-    try {
-        const tag = Localization.getLocales?.()?.[0]?.languageTag || 'en';
-        const base = String(tag).split('-')[0].toLowerCase();
-        return supportedLanguages.includes(base) ? base : 'en';
-    } catch (_e) {
-        return 'en';
-    }
+    const tag = Localization.getLocales?.()?.[0]?.languageTag || 'en';
+    const base = String(tag).split('-')[0].toLowerCase();
+    return supportedLanguages.includes(base) ? base : 'en';
 }
 
-if (!i18n.isInitialized) {
-    /* eslint-disable-next-line import/no-named-as-default-member */
-    i18n
+if (!i18next.isInitialized) {
+    // i18next's plugin API is intentionally exposed on its default instance.
+    // eslint-disable-next-line import/no-named-as-default-member
+    i18next
         .use(initReactI18next)
         .init({
             resources,
@@ -44,4 +41,4 @@ if (!i18n.isInitialized) {
 }
 
 export const getSystemLanguage = resolveDeviceLanguage;
-export default i18n;
+export default i18next;

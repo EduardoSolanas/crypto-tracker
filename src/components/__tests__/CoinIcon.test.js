@@ -8,7 +8,6 @@ jest.mock('../../utils/iconCache', () => ({
         'https://bad.example/icon.png',
         'https://fallback.example/icon.png',
     ]),
-    getInitialIconUri: jest.fn(() => 'https://bad.example/icon.png'),
 }));
 
 describe('CoinIcon', () => {

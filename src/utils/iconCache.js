@@ -1,12 +1,11 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { logger } from './logger.js';
 
 // CryptoCompare base URL for images
 const CC_IMAGE_BASE = 'https://www.cryptocompare.com';
 
 // Local cache directory for icons
-const getIconCacheDir = () => (FileSystem.cacheDirectory ?? '') + 'crypto-icons/';
+const ICON_CACHE_DIR = FileSystem.cacheDirectory + 'crypto-icons/';
 
 // In-memory cache for icon URIs (avoids repeated filesystem checks)
 const memoryCache = {};
@@ -21,13 +20,12 @@ async function ensureCacheDir() {
     if (isWeb) return;
     
     try {
-        const iconCacheDir = getIconCacheDir();
-        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
+        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
         if (!dirInfo.exists) {
-            await FileSystem.makeDirectoryAsync(iconCacheDir, { intermediates: true });
+            await FileSystem.makeDirectoryAsync(ICON_CACHE_DIR, { intermediates: true });
         }
     } catch (_e) {
-        logger.warn('[IconCache] Failed to create cache directory:', _e.message);
+        console.warn('[IconCache] Failed to create cache directory:', _e.message);
     }
 }
 
@@ -35,7 +33,7 @@ async function ensureCacheDir() {
  * Get the local file path for a coin icon
  */
 function getLocalPath(symbol) {
-    return getIconCacheDir() + symbol.toUpperCase() + '.png';
+    return ICON_CACHE_DIR + symbol.toUpperCase() + '.png';
 }
 
 /**
@@ -61,18 +59,6 @@ export function getIconFallbackUris(symbol, imageUrlPath = null) {
         `https://cryptoicons.org/api/icon/${sym}/200`,
     ];
     return [...new Set(candidates.filter(Boolean))];
-}
-
-/**
- * Synchronous initial icon URI — returns a memory-cached local path or
- * the remote URL derived from imageUrl.  Never touches the filesystem.
- * Used by CoinIcon to avoid the letter-fallback flash on first render.
- */
-export function getInitialIconUri(symbol, imageUrlPath = null) {
-    const upperSymbol = String(symbol || '').toUpperCase();
-    if (memoryCache[upperSymbol]) return memoryCache[upperSymbol];
-    if (imageUrlPath) return getRemoteUrl(symbol, imageUrlPath);
-    return null;
 }
 
 /**
@@ -118,12 +104,12 @@ export async function getCachedIconUri(symbol, imageUrlPath = null) {
             return localPath;
         } else {
             // Download failed, return remote URL as fallback
-            logger.warn(`[IconCache] Failed to download icon for ${symbol}, status: ${downloadResult.status}`);
+            console.warn(`[IconCache] Failed to download icon for ${symbol}, status: ${downloadResult.status}`);
             memoryCache[upperSymbol] = remoteUrl;
             return remoteUrl;
         }
     } catch (_e) {
-        logger.warn(`[IconCache] Error caching icon for ${symbol}:`, _e.message);
+        console.warn(`[IconCache] Error caching icon for ${symbol}:`, _e.message);
         // Return remote URL as fallback
         const remoteUrl = getRemoteUrl(symbol, imageUrlPath);
         memoryCache[upperSymbol] = remoteUrl;
@@ -166,15 +152,14 @@ export async function clearIconCache() {
     }
     
     try {
-        const iconCacheDir = getIconCacheDir();
-        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
+        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
         if (dirInfo.exists) {
-            await FileSystem.deleteAsync(iconCacheDir, { idempotent: true });
+            await FileSystem.deleteAsync(ICON_CACHE_DIR, { idempotent: true });
         }
         // Clear memory cache
         Object.keys(memoryCache).forEach(key => delete memoryCache[key]);
     } catch (_e) {
-        logger.warn('[IconCache] Failed to clear cache:', _e.message);
+        console.warn('[IconCache] Failed to clear cache:', _e.message);
     }
 }
 
@@ -185,15 +170,14 @@ export async function getIconCacheSize() {
     if (isWeb) return 0;
     
     try {
-        const iconCacheDir = getIconCacheDir();
-        const dirInfo = await FileSystem.getInfoAsync(iconCacheDir);
+        const dirInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR);
         if (!dirInfo.exists) return 0;
         
-        const files = await FileSystem.readDirectoryAsync(iconCacheDir);
+        const files = await FileSystem.readDirectoryAsync(ICON_CACHE_DIR);
         let totalSize = 0;
         
         for (const file of files) {
-            const fileInfo = await FileSystem.getInfoAsync(iconCacheDir + file);
+            const fileInfo = await FileSystem.getInfoAsync(ICON_CACHE_DIR + file);
             if (fileInfo.exists && fileInfo.size) {
                 totalSize += fileInfo.size;
             }
@@ -204,5 +188,3 @@ export async function getIconCacheSize() {
         return 0;
     }
 }
-
-

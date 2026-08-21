@@ -1,6 +1,6 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import CoinScreen, { __clearChartCacheForTesting } from '../CoinScreen';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import CoinScreen from '../CoinScreen';
 
 const mockUseLocalSearchParams = jest.fn();
 const mockFetchCandles = jest.fn();
@@ -31,16 +31,7 @@ jest.mock('../../cryptoCompare', () => ({
 jest.mock('../../db', () => ({
     getMeta: jest.fn(async () => 'EUR'),
     getHoldingsMap: jest.fn(async () => ({ BTC: 1, ETH: 1 })),
-    // Return a transaction 1000 days ago so getCoinChartFetchParams computes
-    // aggregate=ceil(1000/200)=5, limit=ceil(1000/5)=200 for the ALL range.
-    listTransactionsBySymbol: jest.fn(async () => [{
-        id: 1,
-        symbol: 'BTC',
-        way: 'BUY',
-        amount: 1,
-        quote_amount: 50000,
-        date_iso: new Date(Date.now() - 1000 * 24 * 60 * 60 * 1000).toISOString(),
-    }]),
+    listTransactionsBySymbol: jest.fn(async () => []),
 }));
 
 jest.mock('../../utils/theme', () => ({
@@ -60,26 +51,26 @@ jest.mock('../../utils/theme', () => ({
 
 jest.mock('../../components/CoinIcon', () => {
     const React = require('react');
-    // Use string element type to avoid importing react-native which triggers Flow parsing issues
+    const { View } = require('react-native');
     return function MockCoinIcon() {
-        return React.createElement('View', { testID: 'coin-icon' });
+        return <View testID="coin-icon" />;
     };
 });
 
 jest.mock('react-native-wagmi-charts', () => {
     const React = require('react');
-    // Use string element types to avoid importing react-native which triggers Flow parsing issues
+    const { View } = require('react-native');
 
     function LineChartComponent({ children }) {
-        return React.createElement('View', { testID: 'line-chart' }, children);
+        return React.createElement(View, { testID: 'line-chart' }, children);
     }
-    LineChartComponent.Provider = ({ children }) => React.createElement('View', null, children);
+    LineChartComponent.Provider = ({ children }) => React.createElement(View, null, children);
     LineChartComponent.Path = () => null;
 
     function CandlestickChartComponent({ children }) {
-        return React.createElement('View', { testID: 'candlestick-chart' }, children);
+        return React.createElement(View, { testID: 'candlestick-chart' }, children);
     }
-    CandlestickChartComponent.Provider = ({ children }) => React.createElement('View', null, children);
+    CandlestickChartComponent.Provider = ({ children }) => React.createElement(View, null, children);
     CandlestickChartComponent.Candles = () => null;
 
     return {
@@ -89,17 +80,8 @@ jest.mock('react-native-wagmi-charts', () => {
 });
 
 describe('CoinScreen graph ranges', () => {
-    const mountedScreens = [];
-
-    const renderScreen = () => {
-        const screen = render(<CoinScreen />);
-        mountedScreens.push(screen);
-        return screen;
-    };
-
     beforeEach(() => {
         jest.clearAllMocks();
-        __clearChartCacheForTesting();
         mockFetchCandles.mockResolvedValue([
             {
                 time: Math.floor(Date.now() / 1000) - 3600,
@@ -118,107 +100,50 @@ describe('CoinScreen graph ranges', () => {
         ]);
     });
 
-    afterEach(async () => {
-        while (mountedScreens.length > 0) {
-            mountedScreens.pop().unmount();
-        }
-        await act(async () => {
-            await Promise.resolve();
-        });
-    });
-
     it('uses ALL mode params for per-coin graph', async () => {
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
 
-        const { getByText } = renderScreen();
+        const { getByText } = render(<CoinScreen />);
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'minute', 120, 12);
         });
 
         fireEvent.press(getByText('ALL'));
 
         await waitFor(() => {
-            // Due to time drift between module load and test execution, >1000 days have elapsed.
-            // 1000+ days / 100 = 10.00... -> agg 11. Limit = ceil(1000/11) = 91.
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 91, 11);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 200, 5);
         });
     });
 
     it('accepts legacy id param as symbol fallback', async () => {
         mockUseLocalSearchParams.mockReturnValue({ id: 'ETH' });
 
-        renderScreen();
+        render(<CoinScreen />);
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'hour', 24, 1);
+            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'minute', 120, 12);
         });
     });
 
-    it('recomputes graph when switching ranges', async () => {
+    it('keeps fractional holdings visible in the owned summary', async () => {
+        const cryptoCompare = require('../../cryptoCompare');
+        const db = require('../../db');
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
+        db.getHoldingsMap.mockResolvedValue({ BTC: 0.001234 });
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValueOnce([{
+            symbol: 'BTC',
+            quantity: 0.001234,
+            price: 50000,
+            value: 61.7,
+            change24h: 2.5,
+            imageUrl: null,
+        }]);
 
-        const { getByText } = renderScreen();
-
-        await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
-        });
-
-        await waitFor(() => {
-            expect(getByText('1W')).toBeTruthy();
-        });
-        fireEvent.press(getByText('1W'));
-
-        await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 42, 4);
-        });
-    });
-
-    it('recomputes graph when switching to ALL range', async () => {
-        mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
-
-        const { getByText } = renderScreen();
+        const { getByText } = render(<CoinScreen />);
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 24, 1);
-        });
-
-        await waitFor(() => {
-            expect(getByText('ALL')).toBeTruthy();
-        });
-        fireEvent.press(getByText('ALL'));
-
-        await waitFor(() => {
-            // Updated expectation to match elapsed time behavior (agg 11, limit 91)
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 91, 11);
-        });
-    });
-
-    it('uses initialCoinData from params to render immediately', async () => {
-        const initialCoinData = JSON.stringify({
-            symbol: 'LTC',
-            quantity: 10,
-            price: 150,
-            value: 1500,
-            change24h: 5
-        });
-
-        mockUseLocalSearchParams.mockReturnValue({ symbol: 'LTC', initialCoinData });
-
-        renderScreen();
-
-        // Should render immediately without waiting for fetch (loading is false)
-        // Check for value formatted as EUR (default)
-        // Note: formatMoney output depends on locale/implementation mock, assuming standard format here
-        // The mock above returns 'EUR', formatMoney usually does '€1,500.00'
-
-        // Just checking if chart fetch is triggered immediately is a good proxy that loading is false
-        await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('LTC', 'EUR', 'hour', 24, 1);
-        });
-
-        await act(async () => {
-            await Promise.resolve();
+            expect(getByText('0.001234')).toBeTruthy();
         });
     });
 });
