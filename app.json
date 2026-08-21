@@ -47,7 +47,8 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": false
+      "reactCompiler": false,
+      "buildCacheProvider": "expo/local-build-cache-provider"
     },
     "extra": {
       "router": {},
