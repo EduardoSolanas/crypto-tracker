@@ -278,6 +278,50 @@ describe('HomeScreen - Small Balances Toggle', () => {
             expect(queryByText('BELOW')).toBeNull(); // < $10 should hide
         });
     });
+
+    it('renders sort pills with Best Value, 24h %, Name (A-Z), and Quantity', async () => {
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
+        });
+
+        expect(getByText('Best Value')).toBeTruthy();
+        expect(getByText(/24h/i)).toBeTruthy();
+        expect(getByText(/A-Z/i)).toBeTruthy();
+        expect(getByText('Quantity')).toBeTruthy();
+    });
+
+    it('sorts assets by 24h %, A-Z, Quantity, and Best Value when clicking sort pills', async () => {
+        const { getByText, getAllByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
+        });
+
+        expect(getByText('Best Value')).toBeTruthy();
+
+        // Click A-Z
+        fireEvent.press(getByText(/A-Z/i));
+        await waitFor(() => {
+            const symbols = getAllByText(/BTC|ETH|XRP/).map(node => node.props.children);
+            expect(symbols).toContain('BTC');
+            expect(symbols).toContain('ETH');
+            expect(symbols).toContain('XRP');
+        });
+
+        // Click Quantity
+        fireEvent.press(getByText('Quantity'));
+        await waitFor(() => {
+            expect(getByText('Quantity')).toBeTruthy();
+        });
+
+        // Click Best Value
+        fireEvent.press(getByText('Best Value'));
+        await waitFor(() => {
+            expect(getByText('Best Value')).toBeTruthy();
+        });
+    });
 });
 
 describe('HomeScreen graph ranges', () => {

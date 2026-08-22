@@ -597,9 +597,14 @@ export default function HomeScreen() {
                     </View>
 
                     {/* Sort Pills */}
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortPillsRow}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.sortScrollView}
+                        contentContainerStyle={styles.sortPillsRow}
+                    >
                         {[
-                            { key: 'value', label: tr('home.sortValue', 'Value') },
+                            { key: 'value', label: tr('home.sortValue', 'Best Value') },
                             { key: 'change', label: tr('home.sortChange', '24h %') },
                             { key: 'name', label: tr('home.sortName', 'A-Z') },
                             { key: 'quantity', label: tr('home.sortQuantity', 'Quantity') }
@@ -690,7 +695,7 @@ export default function HomeScreen() {
                                                 fontWeight: '600',
                                                 marginLeft: 4
                                             }}>
-                                                ({isPositive ? '+' : ''}{deltaData.pct.toFixed(2)}%)
+                                                ({isPositive ? '+' : ''}{Number(deltaData?.pct || 0).toFixed(2)}%)
                                             </Text>
                                         </View>
                                     </View>
@@ -802,10 +807,14 @@ const styles = StyleSheet.create({
         padding: 0,
     },
 
+    sortScrollView: {
+        marginHorizontal: -16,
+        marginBottom: 14,
+    },
     sortPillsRow: {
         flexDirection: 'row',
+        paddingHorizontal: 16,
         gap: 8,
-        marginBottom: 14,
     },
     sortPill: {
         paddingHorizontal: 12,
