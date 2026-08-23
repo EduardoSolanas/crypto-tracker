@@ -38,6 +38,42 @@ export function getMasterTimeframeParams(range, options = {}) {
 }
 
 /**
+ * Aggregates raw fine-grained candles (e.g. 1-minute) into larger time buckets (e.g. 5-min, 30-min, 1-hour).
+ */
+export function aggregateCandleBuckets(candles, bucketDurationSec) {
+    if (!Array.isArray(candles) || candles.length === 0) return [];
+    if (!bucketDurationSec || bucketDurationSec <= 60) return [...candles];
+
+    const buckets = new Map();
+    const baseTime = candles[0].time;
+
+    for (const c of candles) {
+        const offset = c.time - baseTime;
+        const bucketKey = baseTime + Math.floor(offset / bucketDurationSec) * bucketDurationSec;
+        if (!buckets.has(bucketKey)) {
+            buckets.set(bucketKey, {
+                time: bucketKey,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volumefrom: c.volumefrom || 0,
+                volumeto: c.volumeto || 0
+            });
+        } else {
+            const b = buckets.get(bucketKey);
+            b.high = Math.max(b.high, c.high);
+            b.low = Math.min(b.low, c.low);
+            b.close = c.close;
+            b.volumefrom += (c.volumefrom || 0);
+            b.volumeto += (c.volumeto || 0);
+        }
+    }
+
+    return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
+}
+
+/**
  * Slices a subset of candles corresponding to the specified time window.
  */
 export function sliceCandlesForRange(candles, range, nowSec = Math.floor(Date.now() / 1000)) {

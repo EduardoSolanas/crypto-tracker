@@ -2,7 +2,8 @@ import {
     sliceCandlesForRange,
     prepareSimplifiedLinePoints,
     prepareSimplifiedCandles,
-    getMasterTimeframeParams
+    getMasterTimeframeParams,
+    aggregateCandleBuckets
 } from '../chartDataCache';
 
 describe('chartDataCache', () => {
@@ -30,6 +31,37 @@ describe('chartDataCache', () => {
             low: 45 + i * 0.5,
             close: 52 + i * 0.5,
         };
+    });
+
+    describe('aggregateCandleBuckets', () => {
+        it('aggregates 60 1-minute candles into 12 5-minute candles with correct OHLC', () => {
+            const mockMinuteCandles = Array.from({ length: 60 }, (_, i) => ({
+                time: 1700000000 + i * 60,
+                open: 100 + i,
+                high: 105 + i,
+                low: 95 + i,
+                close: 102 + i,
+                volumefrom: 10,
+                volumeto: 1000
+            }));
+
+            const aggregated = aggregateCandleBuckets(mockMinuteCandles, 300); // 5-minute buckets
+            expect(aggregated.length).toBe(12);
+
+            // First bucket (indices 0..4)
+            expect(aggregated[0].open).toBe(100); // open of index 0
+            expect(aggregated[0].close).toBe(106); // close of index 4 (102 + 4)
+            expect(aggregated[0].high).toBe(109); // high of index 4 (105 + 4)
+            expect(aggregated[0].low).toBe(95); // low of index 0
+            expect(aggregated[0].volumefrom).toBe(50);
+        });
+
+        it('returns raw array if bucket duration is 60s or empty', () => {
+            const raw = [{ time: 1000, open: 1, high: 2, low: 0.5, close: 1.5 }];
+            expect(aggregateCandleBuckets(raw, 60)).toEqual(raw);
+            expect(aggregateCandleBuckets([], 300)).toEqual([]);
+            expect(aggregateCandleBuckets(null, 300)).toEqual([]);
+        });
     });
 
     describe('sliceCandlesForRange', () => {
