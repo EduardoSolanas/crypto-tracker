@@ -318,10 +318,12 @@ async function fetchBinanceCandles(symbol, currency, timeframe, limit) {
 }
 
 const candleCache = new Map();
+const inFlightCandleRequests = new Map();
 const CANDLE_CACHE_TTL = 3 * 60 * 1000; // 3 minutes TTL
 
 export function clearCandleCache() {
     candleCache.clear();
+    inFlightCandleRequests.clear();
 }
 
 export async function fetchHistory(symbol, currency, limit = 30) {
@@ -339,29 +341,40 @@ export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 
         return cached.data;
     }
 
-    let candles = [];
-    try {
-        let endpoint = 'histoday';
-        if (timeframe === 'hour') endpoint = 'histohour';
-        if (timeframe === 'minute') endpoint = 'histominute';
+    if (inFlightCandleRequests.has(cacheKey)) {
+        return inFlightCandleRequests.get(cacheKey);
+    }
 
-        const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${sym}&tsym=${curr}&limit=${limit}&aggregate=${aggregate}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('CryptoCompare HTTP Error');
-        const json = await res.json();
+    const requestPromise = (async () => {
+        let candles = [];
+        try {
+            let endpoint = 'histoday';
+            if (timeframe === 'hour') endpoint = 'histohour';
+            if (timeframe === 'minute') endpoint = 'histominute';
 
-        if (json.Response === 'Error' || json.Err || !json?.Data?.Data || !json?.Data?.Data?.length) {
-            throw new Error(json?.Message || json?.Err?.message || 'No candle data');
+            const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${sym}&tsym=${curr}&limit=${limit}&aggregate=${aggregate}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('CryptoCompare HTTP Error');
+            const json = await res.json();
+
+            if (json.Response === 'Error' || json.Err || !json?.Data?.Data || !json?.Data?.Data?.length) {
+                throw new Error(json?.Message || json?.Err?.message || 'No candle data');
+            }
+
+            candles = json.Data.Data;
+        } catch (_e) {
+            candles = await fetchBinanceCandles(sym, curr, timeframe, limit);
         }
 
-        candles = json.Data.Data;
-    } catch (_e) {
-        candles = await fetchBinanceCandles(sym, curr, timeframe, limit);
-    }
+        if (candles && candles.length > 0) {
+            candleCache.set(cacheKey, { timestamp: Date.now(), data: candles });
+        }
 
-    if (candles && candles.length > 0) {
-        candleCache.set(cacheKey, { timestamp: now, data: candles });
-    }
+        return candles;
+    })().finally(() => {
+        inFlightCandleRequests.delete(cacheKey);
+    });
 
-    return candles;
+    inFlightCandleRequests.set(cacheKey, requestPromise);
+    return requestPromise;
 }

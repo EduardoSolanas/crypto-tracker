@@ -68,6 +68,7 @@ export default function HomeScreen() {
     const [showSmallBalances, setShowSmallBalances] = useState(false);
     const didBootstrapRef = useRef(false);
     const rangeCacheRef = useRef(new Map());
+    const txnsRef = useRef([]);
 
     const totalValue = useMemo(
         () => (portfolio ? portfolio.reduce((acc, c) => acc + (c.value || 0), 0) : 0),
@@ -75,8 +76,9 @@ export default function HomeScreen() {
     );
 
     const getEffectiveHoldings = useCallback(async () => {
-        const allTxns = await getAllTransactions();
+        const allTxns = txnsRef.current.length > 0 ? txnsRef.current : await getAllTransactions();
         if (allTxns && allTxns.length > 0) {
+            txnsRef.current = allTxns;
             return computeHoldingsFromTxns(
                 allTxns.map(t => ({
                     symbol: t.symbol,
@@ -155,6 +157,7 @@ export default function HomeScreen() {
             setChartColor(cached.chartColor);
             setCoinDeltas(cached.coinDeltas);
             setGraphError('');
+            return;
         } else if (!isBackground) {
             setGraphLoading(true);
         }
@@ -192,22 +195,24 @@ export default function HomeScreen() {
     }, [tr]);
 
     const prewarmRanges = useCallback((allTxns, currentPortfolio, selectedCurrency) => {
-        const ranges = ['1W', '1M', '1Y', 'ALL', '1H'];
-        ranges.forEach(async (r) => {
-            try {
-                const cacheKey = `${r}_${selectedCurrency}`;
-                if (!rangeCacheRef.current.has(cacheKey)) {
-                    const res = await computePortfolioHistory({
-                        allTxns,
-                        currentPortfolio,
-                        currency: selectedCurrency,
-                        range: r,
-                        fetchCandles
-                    });
-                    rangeCacheRef.current.set(cacheKey, res);
-                }
-            } catch (_e) {}
-        });
+        const priorityRanges = ['1W', '1M', 'ALL', '1Y', '1H'];
+        (async () => {
+            for (const r of priorityRanges) {
+                try {
+                    const cacheKey = `${r}_${selectedCurrency}`;
+                    if (!rangeCacheRef.current.has(cacheKey)) {
+                        const res = await computePortfolioHistory({
+                            allTxns,
+                            currentPortfolio,
+                            currency: selectedCurrency,
+                            range: r,
+                            fetchCandles
+                        });
+                        rangeCacheRef.current.set(cacheKey, res);
+                    }
+                } catch (_e) {}
+            }
+        })();
     }, []);
 
     const handleRangeSelect = useCallback((r) => {
@@ -219,17 +224,38 @@ export default function HomeScreen() {
             setDelta(cached.delta);
             setChartColor(cached.chartColor);
             setCoinDeltas(cached.coinDeltas);
+            setGraphError('');
+        } else if (portfolio && portfolio.length > 0) {
+            const txs = txnsRef.current && txnsRef.current.length > 0 ? txnsRef.current : null;
+            if (txs) {
+                computeHistory(txs, portfolio, currency, r);
+            } else {
+                getAllTransactions().then((all) => {
+                    txnsRef.current = all || [];
+                    if (all && all.length > 0) computeHistory(all, portfolio, currency, r);
+                });
+            }
         }
-    }, [currency]);
+    }, [computeHistory, currency, portfolio]);
 
     // Recompute graph whenever range/currency/portfolio changes.
     useEffect(() => {
         if (!portfolio || portfolio.length === 0) return;
-        getAllTransactions().then((txs) => {
-            if (txs && txs.length > 0) {
-                computeHistory(txs, portfolio, currency, range);
-            }
-        });
+        const cacheKey = `${range}_${currency}`;
+        if (rangeCacheRef.current.has(cacheKey)) {
+            return;
+        }
+        const txs = txnsRef.current && txnsRef.current.length > 0 ? txnsRef.current : null;
+        if (txs) {
+            computeHistory(txs, portfolio, currency, range);
+        } else {
+            getAllTransactions().then((all) => {
+                txnsRef.current = all || [];
+                if (all && all.length > 0) {
+                    computeHistory(all, portfolio, currency, range);
+                }
+            });
+        }
     }, [computeHistory, currency, portfolio, range]);
 
     useEffect(() => {
@@ -244,6 +270,7 @@ export default function HomeScreen() {
                 setCurrency(selectedCurrency);
 
                 const allTxns = await getAllTransactions();
+                txnsRef.current = allTxns || [];
                 if (!allTxns || allTxns.length === 0) {
                     setPortfolio([]);
                     setBooting(false);
@@ -327,6 +354,7 @@ export default function HomeScreen() {
 
             const p = await fetchPortfolioPrices(holdings, currency);
             const allTxns = await getAllTransactions();
+            txnsRef.current = allTxns || [];
             setPortfolio(p);
             computeHistory(allTxns, p, currency, range);
 
@@ -347,6 +375,7 @@ export default function HomeScreen() {
         clearCandleCache();
         try {
             const allTxns = await getAllTransactions();
+            txnsRef.current = allTxns || [];
             if (!allTxns || allTxns.length === 0) {
                 setPortfolio([]);
                 return;

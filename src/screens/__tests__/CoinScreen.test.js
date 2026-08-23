@@ -100,19 +100,26 @@ describe('CoinScreen graph ranges', () => {
         ]);
     });
 
-    it('uses ALL mode params for per-coin graph', async () => {
+    it('uses master timeframe params and instant slicing for per-coin graph', async () => {
         mockUseLocalSearchParams.mockReturnValue({ symbol: 'BTC' });
 
         const { getByText } = render(<CoinScreen />);
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'minute', 120, 12);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 168, 1);
         });
 
+        // Tapping 1W should slice instantly without firing another network request
+        mockFetchCandles.mockClear();
+        fireEvent.press(getByText('1W'));
+
+        expect(mockFetchCandles).not.toHaveBeenCalled();
+
+        // Tapping ALL fetches daily master series
         fireEvent.press(getByText('ALL'));
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 200, 5);
+            expect(mockFetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'day', 2000, 1);
         });
     });
 
@@ -122,7 +129,7 @@ describe('CoinScreen graph ranges', () => {
         render(<CoinScreen />);
 
         await waitFor(() => {
-            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'minute', 120, 12);
+            expect(mockFetchCandles).toHaveBeenCalledWith('ETH', 'EUR', 'hour', 168, 1);
         });
     });
 

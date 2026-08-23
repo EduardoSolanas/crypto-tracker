@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, BarChart3, MoreVertical, Plus, X } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     ActivityIndicator,
@@ -20,7 +20,8 @@ import { fetchCandles, fetchFxRates, fetchPortfolioPrices } from '../cryptoCompa
 import { getHoldingsMap, getMeta, listTransactionsBySymbol } from '../db';
 import { formatMoney, formatNumber, formatQuantity } from '../utils/format';
 import { mapCandlesToPoints } from '../utils/chartContracts';
-import { COIN_CHART_RANGES, getCoinChartFetchParams } from '../utils/coinChartRange';
+import { COIN_CHART_RANGES } from '../utils/coinChartRange';
+import { getMasterTimeframeParams, sliceCandlesForRange } from '../utils/chartDataCache';
 import { computeCoinTransactionStats } from '../utils/transactionCalculations';
 import { useTheme } from '../utils/theme';
 
@@ -126,18 +127,107 @@ export default function CoinScreen() {
     const [deferredReady, setDeferredReady] = useState(false);
     const [fxRates, setFxRates] = useState({});
     const [isBreakdownVisible, setIsBreakdownVisible] = useState(false);
+    const coinRangeCacheRef = useRef(new Map());
+    const masterCandlesRef = useRef(new Map());
+
+    const loadChartData = useCallback(async (targetRange, isBackground = false) => {
+        if (!sym) return;
+        const cacheKey = `${targetRange}_${currency}`;
+        const cached = coinRangeCacheRef.current.get(cacheKey);
+
+        if (cached && cached.length > 0) {
+            setChartData(cached);
+            setChartError('');
+            if (!isBackground) setChartLoading(false);
+            return;
+        }
+
+        if (!isBackground) {
+            setChartLoading(true);
+            setChartError('');
+        }
+
+        try {
+            const earliestTxMs = txs.length
+                ? txs.reduce((min, t) => {
+                    const ts = new Date(t.date_iso).getTime();
+                    return Number.isFinite(ts) ? Math.min(min, ts) : min;
+                }, Date.now())
+                : null;
+
+            const masterParams = getMasterTimeframeParams(targetRange, { earliestTxMs });
+            const masterKey = `${masterParams.timeframe}_${currency}`;
+            let masterCandles = masterCandlesRef.current.get(masterKey);
+
+            if (!masterCandles || !masterCandles.length) {
+                masterCandles = await fetchCandles(sym, currency, masterParams.timeframe, masterParams.limit, masterParams.aggregate);
+                if (masterCandles && masterCandles.length) {
+                    masterCandlesRef.current.set(masterKey, masterCandles);
+                }
+            }
+
+            if (masterCandles && masterCandles.length) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                if (masterParams.timeframe === 'hour') {
+                    const slice1D = sliceCandlesForRange(masterCandles, '1D', nowSec);
+                    const slice1W = sliceCandlesForRange(masterCandles, '1W', nowSec);
+                    coinRangeCacheRef.current.set(`1D_${currency}`, mapCandlesToPoints(slice1D));
+                    coinRangeCacheRef.current.set(`1W_${currency}`, mapCandlesToPoints(slice1W));
+                } else if (masterParams.timeframe === 'day') {
+                    const slice1M = sliceCandlesForRange(masterCandles, '1M', nowSec);
+                    const slice1Y = sliceCandlesForRange(masterCandles, '1Y', nowSec);
+                    const sliceALL = sliceCandlesForRange(masterCandles, 'ALL', nowSec);
+                    coinRangeCacheRef.current.set(`1M_${currency}`, mapCandlesToPoints(slice1M));
+                    coinRangeCacheRef.current.set(`1Y_${currency}`, mapCandlesToPoints(slice1Y));
+                    coinRangeCacheRef.current.set(`ALL_${currency}`, mapCandlesToPoints(sliceALL));
+                } else {
+                    const slice1H = sliceCandlesForRange(masterCandles, '1H', nowSec);
+                    coinRangeCacheRef.current.set(`1H_${currency}`, mapCandlesToPoints(slice1H));
+                }
+
+                const resultPoints = coinRangeCacheRef.current.get(cacheKey) || mapCandlesToPoints(sliceCandlesForRange(masterCandles, targetRange, nowSec));
+                setChartData(resultPoints);
+            } else {
+                setChartData([]);
+            }
+        } catch (e) {
+            if (!cached) {
+                setChartError(e?.message || t('home.refreshErrorTitle', 'Refresh Error'));
+                setChartData([]);
+            }
+        } finally {
+            if (!isBackground) {
+                setChartLoading(false);
+            }
+        }
+    }, [currency, sym, t, txs]);
+
+    const handleRangeSelect = useCallback((r) => {
+        setRange(r);
+        const cacheKey = `${r}_${currency}`;
+        const cached = coinRangeCacheRef.current.get(cacheKey);
+        if (cached && cached.length > 0) {
+            setChartData(cached);
+            setChartError('');
+        } else {
+            loadChartData(r);
+        }
+    }, [currency, loadChartData]);
 
     const refreshData = useCallback(async () => {
+        coinRangeCacheRef.current.clear();
+        masterCandlesRef.current.clear();
         try {
             const rows = await listTransactionsBySymbol(sym);
             setTxs(rows);
             const holdings = await getHoldingsMap();
             const p = await fetchPortfolioPrices({ [sym]: holdings[sym] || 0 }, currency);
             setCoin(p[0] || { symbol: sym, quantity: holdings[sym] || 0, price: 0, value: 0, change24h: 0 });
+            loadChartData(range);
         } catch (_e) {
             Alert.alert(t('coin.unableRefreshTitle', 'Error'), t('coin.unableRefreshMessage', 'Unable to refresh coin data.'));
         }
-    }, [sym, currency, t]);
+    }, [sym, currency, loadChartData, range, t]);
 
     useEffect(() => {
         let isMounted = true;
@@ -189,44 +279,16 @@ export default function CoinScreen() {
     }, [currency, txs]);
 
     useEffect(() => {
-        let isMounted = true;
-        (async () => {
-            if (!sym) return;
-            setChartLoading(true);
-            setChartError('');
-            try {
-                const startTime = Date.now();
-                const earliestTxMs = txs.length
-                    ? txs.reduce((min, t) => {
-                        const ts = new Date(t.date_iso).getTime();
-                        return Number.isFinite(ts) ? Math.min(min, ts) : min;
-                    }, Date.now())
-                    : null;
-                const { timeframe, limit, aggregate } = getCoinChartFetchParams(range, { earliestTxMs });
-
-                const candles = await fetchCandles(sym, currency, timeframe, limit, aggregate);
-                const endTime = Date.now();
-                if (globalThis.__DEV__) {
-                    console.log(`[PERF] Coin Chart (${range}): ${endTime - startTime}ms (${candles.length} pts)`);
-                }
-                if (isMounted) {
-                    if (candles && candles.length) {
-                        setChartData(mapCandlesToPoints(candles));
-                    } else {
-                        setChartData([]);
-                    }
-                }
-            } catch (e) {
-                if (isMounted) {
-                    setChartError(e?.message || t('home.refreshErrorTitle', 'Refresh Error'));
-                    setChartData([]);
-                }
-            } finally {
-                if (isMounted) setChartLoading(false);
+        const cacheKey = `${range}_${currency}`;
+        if (coinRangeCacheRef.current.has(cacheKey)) {
+            const cached = coinRangeCacheRef.current.get(cacheKey);
+            if (cached && cached.length > 0) {
+                setChartData(cached);
+                return;
             }
-        })();
-        return () => { isMounted = false; };
-    }, [sym, currency, range, t, txs]);
+        }
+        loadChartData(range);
+    }, [currency, loadChartData, range, sym]);
 
     const txStats = useMemo(() => {
         return computeCoinTransactionStats(txs, coin?.price || 0, coin?.quantity || 0, {
@@ -421,7 +483,7 @@ export default function CoinScreen() {
                                         {COIN_CHART_RANGES.map(r => (
                                             <TouchableOpacity
                                                 key={r}
-                                                onPress={() => setRange(r)}
+                                                onPress={() => handleRangeSelect(r)}
                                                 disabled={chartLoading}
                                                 style={[
                                                     styles.rangePill,
