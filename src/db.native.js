@@ -371,6 +371,7 @@ const CACHE_META_KEYS = [
     'cached_range',
     'cached_custom_ts',
     'cached_currency',
+    'cached_ranges_map',
 ];
 
 export async function clearCache() {
@@ -379,7 +380,7 @@ export async function clearCache() {
     await db.runAsync(`DELETE FROM meta WHERE key IN (${placeholders})`, CACHE_META_KEYS);
 }
 
-export async function saveCache(p, cData, d, r, currency) {
+export async function saveCache(p, cData, d, r, currency, rangesMap = null) {
     try {
         await setMeta('cached_portfolio', JSON.stringify(p));
         await setMeta('cached_chart_data', JSON.stringify(cData));
@@ -387,6 +388,9 @@ export async function saveCache(p, cData, d, r, currency) {
         await setMeta('cached_range', r);
         await setMeta('cached_custom_ts', Date.now().toString());
         await setMeta('cached_currency', String(currency || '').toUpperCase());
+        if (rangesMap) {
+            await setMeta('cached_ranges_map', JSON.stringify(rangesMap));
+        }
     } catch (e) {
         console.error('[DB][native] saveCache Error', e);
     }
@@ -400,16 +404,22 @@ export async function loadCache(currency) {
         const rStr = await getMeta('cached_range');
         const tsStr = await getMeta('cached_custom_ts');
         const cachedCurrency = await getMeta('cached_currency');
+        const rangesMapStr = await getMeta('cached_ranges_map');
         const requestedCurrency = String(currency || '').toUpperCase();
 
         if (pStr && cStr && cachedCurrency && (!requestedCurrency || cachedCurrency === requestedCurrency)) {
+            let rangesMap = {};
+            if (rangesMapStr) {
+                try { rangesMap = JSON.parse(rangesMapStr); } catch (_e) {}
+            }
             return {
                 portfolio: JSON.parse(pStr),
                 chartData: JSON.parse(cStr),
                 delta: dStr ? JSON.parse(dStr) : { val: 0, pct: 0 },
                 range: rStr || '1D',
                 currency: cachedCurrency,
-                timestamp: tsStr ? Number(tsStr) : 0
+                timestamp: tsStr ? Number(tsStr) : 0,
+                rangesMap
             };
         }
     } catch (e) {

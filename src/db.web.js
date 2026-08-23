@@ -168,13 +168,16 @@ export async function replaceAllTransactions(txns) {
 
 /* ---------------- CACHE ---------------- */
 
-export async function saveCache(portfolio, chartData, delta, range, currency) {
+export async function saveCache(portfolio, chartData, delta, range, currency, rangesMap = null) {
     await setMeta('cached_portfolio', JSON.stringify(portfolio));
     await setMeta('cached_chart_data', JSON.stringify(chartData));
     await setMeta('cached_delta', JSON.stringify(delta));
     await setMeta('cached_range', range);
     await setMeta('cached_custom_ts', Date.now().toString());
     await setMeta('cached_currency', String(currency || '').toUpperCase());
+    if (rangesMap) {
+        await setMeta('cached_ranges_map', JSON.stringify(rangesMap));
+    }
 }
 
 export async function loadCache(currency) {
@@ -185,9 +188,15 @@ export async function loadCache(currency) {
         const range = await getMeta('cached_range');
         const timestamp = await getMeta('cached_custom_ts');
         const cachedCurrency = await getMeta('cached_currency');
+        const rangesMapStr = await getMeta('cached_ranges_map');
         const requestedCurrency = String(currency || '').toUpperCase();
 
         if (!portfolio || !chartData || !cachedCurrency || (requestedCurrency && cachedCurrency !== requestedCurrency)) return null;
+
+        let rangesMap = {};
+        if (rangesMapStr) {
+            try { rangesMap = JSON.parse(rangesMapStr); } catch (_e) {}
+        }
 
         return {
             portfolio: JSON.parse(portfolio),
@@ -196,6 +205,7 @@ export async function loadCache(currency) {
             range: range || '1D',
             currency: cachedCurrency,
             timestamp: timestamp ? Number(timestamp) : 0,
+            rangesMap
         };
     } catch (error) {
         console.error('[DB][web] loadCache Error', error);

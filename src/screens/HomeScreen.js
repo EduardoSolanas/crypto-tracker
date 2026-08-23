@@ -180,7 +180,8 @@ export default function HomeScreen() {
             setCoinDeltas(coinDeltas);
 
             if (currentPortfolio?.length && selectedRange === '1D') {
-                saveCache(currentPortfolio, chartData, delta, selectedRange, selectedCurrency);
+                const rangesObj = Object.fromEntries(rangeCacheRef.current.entries());
+                saveCache(currentPortfolio, chartData, delta, selectedRange, selectedCurrency, rangesObj);
             }
         } catch (e) {
             if (globalThis.__DEV__) console.error('[computeHistory] Error', e);
@@ -195,9 +196,30 @@ export default function HomeScreen() {
     }, [tr]);
 
     const prewarmRanges = useCallback((allTxns, currentPortfolio, selectedCurrency) => {
-        const priorityRanges = ['1W', '1M', 'ALL', '1Y', '1H'];
         (async () => {
-            for (const r of priorityRanges) {
+            // 1. Immediately prewarm 1H and 1W in parallel
+            const immediateRanges = ['1H', '1W'];
+            await Promise.all(
+                immediateRanges.map(async (r) => {
+                    try {
+                        const cacheKey = `${r}_${selectedCurrency}`;
+                        if (!rangeCacheRef.current.has(cacheKey)) {
+                            const res = await computePortfolioHistory({
+                                allTxns,
+                                currentPortfolio,
+                                currency: selectedCurrency,
+                                range: r,
+                                fetchCandles
+                            });
+                            rangeCacheRef.current.set(cacheKey, res);
+                        }
+                    } catch (_e) {}
+                })
+            );
+
+            // 2. Prewarm remaining ranges sequentially (1M, ALL, 1Y)
+            const remainingRanges = ['1M', 'ALL', '1Y'];
+            for (const r of remainingRanges) {
                 try {
                     const cacheKey = `${r}_${selectedCurrency}`;
                     if (!rangeCacheRef.current.has(cacheKey)) {
@@ -212,6 +234,15 @@ export default function HomeScreen() {
                     }
                 } catch (_e) {}
             }
+
+            // 3. Persist complete multi-range cache
+            try {
+                const rangesObj = Object.fromEntries(rangeCacheRef.current.entries());
+                const d1Data = rangeCacheRef.current.get(`1D_${selectedCurrency}`);
+                if (d1Data) {
+                    saveCache(currentPortfolio, d1Data.chartData, d1Data.delta, '1D', selectedCurrency, rangesObj);
+                }
+            } catch (_e) {}
         })();
     }, []);
 
@@ -286,6 +317,11 @@ export default function HomeScreen() {
                 }
 
                 const cached = await loadCache(selectedCurrency);
+                if (cached?.rangesMap) {
+                    Object.entries(cached.rangesMap).forEach(([k, v]) => {
+                        rangeCacheRef.current.set(k, v);
+                    });
+                }
                 const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
 
                 setPortfolio(p);
