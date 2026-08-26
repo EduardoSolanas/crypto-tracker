@@ -1,7 +1,8 @@
 import React, { memo, useMemo } from 'react';
 import { Dimensions, Text, View } from 'react-native';
+import * as d3Shape from 'd3-shape';
 import { CandlestickChart, LineChart } from 'react-native-wagmi-charts';
-import { downsampleCandleData, downsampleLineData } from '../utils/chartSampling';
+import { downsampleCandleData, downsampleLineData, smoothLineData } from '../utils/chartSampling';
 import { formatCompactMoney } from '../utils/format';
 import { useTheme } from '../utils/theme';
 
@@ -15,7 +16,7 @@ function GridLines({ isDark }) {
                     key={i}
                     style={{
                         borderBottomWidth: 1,
-                        borderColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(15,23,42,0.30)',
+                        borderColor: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.22)',
                         borderStyle: 'dotted',
                         opacity: 1,
                         width: '100%'
@@ -38,12 +39,13 @@ function CryptoGraph({
 
     const screenWidth = width || Dimensions.get('window').width;
     const chartWidth = screenWidth - 50; // Reserve space for labels
-    const maxLinePoints = Math.max(40, Math.floor(chartWidth / 4));
-    const maxCandlePoints = Math.max(40, Math.floor(chartWidth / 5));
+    const maxLinePoints = Math.min(30, Math.max(16, Math.floor(chartWidth / 12)));
+    const maxCandlePoints = Math.max(30, Math.floor(chartWidth / 8));
 
     const lineProcessed = useMemo(() => {
         if (type !== 'line' || !data || data.length === 0) return null;
         const sampled = downsampleLineData(data, maxLinePoints);
+        const smoothed = smoothLineData(sampled);
         let min = Infinity;
         let max = -Infinity;
         for (let i = 0; i < data.length; i++) {
@@ -54,7 +56,7 @@ function CryptoGraph({
             }
         }
         return {
-            sampledData: sampled,
+            sampledData: smoothed,
             min: Number.isFinite(min) ? min : 0,
             max: Number.isFinite(max) ? max : 0
         };
@@ -88,7 +90,8 @@ function CryptoGraph({
                 <View style={{ width: chartWidth, position: 'relative' }}>
                     <GridLines isDark={isDark} />
                     <LineChart.Provider data={lineProcessed.sampledData}>
-                        <LineChart width={chartWidth} height={height}>
+                        <LineChart width={chartWidth} height={height} shape={d3Shape.curveMonotoneX}>
+                            <LineChart.Gradient color={color} />
                             <LineChart.Path color={color} width={2.5} />
                         </LineChart>
                     </LineChart.Provider>

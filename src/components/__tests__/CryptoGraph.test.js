@@ -14,6 +14,7 @@ jest.mock('react-native-wagmi-charts', () => {
     }
     LineChartComponent.Provider = MockView;
     LineChartComponent.Path = () => null;
+    LineChartComponent.Gradient = () => null;
     LineChartComponent.CursorCrosshair = () => React.createElement(View, { testID: 'cursor-crosshair' });
     LineChartComponent.PriceText = () => React.createElement(Text, { testID: 'price-text' }, 'Price');
 

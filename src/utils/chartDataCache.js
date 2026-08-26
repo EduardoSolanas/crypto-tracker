@@ -107,10 +107,12 @@ export function prepareSimplifiedLinePoints(rawPoints, maxPoints = 50) {
     let min = Infinity;
     let max = -Infinity;
 
-    for (let i = 0; i < sampled.length; i++) {
-        const val = sampled[i].value;
-        if (val < min) min = val;
-        if (val > max) max = val;
+    for (let i = 0; i < rawPoints.length; i++) {
+        const val = rawPoints[i]?.value;
+        if (typeof val === 'number') {
+            if (val < min) min = val;
+            if (val > max) max = val;
+        }
     }
 
     if (!Number.isFinite(min)) min = 0;
@@ -135,10 +137,12 @@ export function prepareSimplifiedCandles(rawCandles, maxPoints = 50) {
     let min = Infinity;
     let max = -Infinity;
 
-    for (let i = 0; i < sampled.length; i++) {
-        const c = sampled[i];
-        if (c.low < min) min = c.low;
-        if (c.high > max) max = c.high;
+    for (let i = 0; i < rawCandles.length; i++) {
+        const c = rawCandles[i];
+        if (c) {
+            if (typeof c.low === 'number' && c.low < min) min = c.low;
+            if (typeof c.high === 'number' && c.high > max) max = c.high;
+        }
     }
 
     if (!Number.isFinite(min)) min = 0;

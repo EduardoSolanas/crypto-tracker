@@ -12,6 +12,7 @@ function LineChartComponent({ children, width, height }) {
 // Add sub-components as properties
 LineChartComponent.Provider = MockView;
 LineChartComponent.Path = () => null;
+LineChartComponent.Gradient = () => null;
 LineChartComponent.CursorCrosshair = () => null;
 LineChartComponent.PriceText = MockText;
 

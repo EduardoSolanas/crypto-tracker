@@ -108,9 +108,9 @@ export const computePortfolioHistory = async ({
         simStep = 300; // 5 minute intervals for display
     }
     if (range === '1W') {
-        // Keep chart readable while still spanning the full week.
-        simStep = 7200; // 2-hour intervals
-        simLimit = 84;  // 7 days * 12 points/day
+        // Keep chart smooth and lightweight while spanning the full week (4 points per day).
+        simStep = 21600; // 6-hour intervals
+        simLimit = 28;  // 7 days * 4 points/day
     }
 
     // For ALL and 1Y, sample data points to avoid too many

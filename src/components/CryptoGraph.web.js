@@ -1,5 +1,5 @@
 import { Dimensions, Text, View } from 'react-native';
-import { downsampleCandleData, downsampleLineData } from '../utils/chartSampling';
+import { downsampleCandleData, downsampleLineData, smoothLineData } from '../utils/chartSampling';
 import { formatCompactMoney } from '../utils/format';
 import { useTheme } from '../utils/theme';
 
@@ -23,9 +23,11 @@ export default function CryptoGraph({
     if (!data?.length || !['line', 'candle'].includes(type)) return null;
 
     const chartWidth = (width || Dimensions.get('window').width) - 50;
-    const maxPoints = Math.max(40, Math.floor(chartWidth / (type === 'line' ? 4 : 5)));
+    const maxPoints = type === 'line'
+        ? Math.min(30, Math.max(16, Math.floor(chartWidth / 12)))
+        : Math.max(30, Math.floor(chartWidth / 8));
     const sampledData = type === 'line'
-        ? downsampleLineData(data, maxPoints)
+        ? smoothLineData(downsampleLineData(data, maxPoints))
         : downsampleCandleData(data, maxPoints);
     const values = type === 'line'
         ? data.map(({ value }) => Number(value))
