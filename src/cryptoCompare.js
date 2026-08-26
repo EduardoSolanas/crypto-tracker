@@ -74,12 +74,11 @@ function mapCcQuoteToPortfolioRow(sym, d, quantity) {
     };
 }
 
-// --- MULTI-EXCHANGE PRICING (Binance / Coinbase / Gate.io) ---
+// --- MULTI-EXCHANGE PRICING (Binance / Gate.io / MEXC / DexScreener / Coinbase) ---
 async function fetchBinancePrices(holdingsMap, currency) {
     debugLog('[API] Using Multi-Exchange Pricing');
-    const symbols = Object.keys(holdingsMap);
+    const symbols = Object.keys(holdingsMap || {});
     const target = String(currency || 'EUR').toUpperCase();
-    const portfolio = [];
 
     let usdtToTarget = 1;
     if (target !== 'USD') {
@@ -96,7 +95,7 @@ async function fetchBinancePrices(holdingsMap, currency) {
         }
     }
 
-    await Promise.all(symbols.map(async (sym) => {
+    const portfolio = await Promise.all(symbols.map(async (sym) => {
         const quantity = holdingsMap[sym] ?? 0;
         let price = 0;
         let change24h = 0;
@@ -104,7 +103,7 @@ async function fetchBinancePrices(holdingsMap, currency) {
         let low24h = 0;
         let vol24h = 0;
 
-        // 1. Binance direct pair
+        // 1. Binance direct pair (e.g. BTCEUR, ETHEUR, XRPEUR)
         try {
             const resDirect = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}${target}`);
             if (resDirect.ok) {
@@ -114,19 +113,45 @@ async function fetchBinancePrices(holdingsMap, currency) {
                 high24h = parseFloat(j.highPrice);
                 low24h = parseFloat(j.lowPrice);
                 vol24h = parseFloat(j.volume);
-            } else {
-                // 2. Binance USDT pair
-                const resUsdt = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
-                if (resUsdt.ok) {
-                    const j = await resUsdt.json();
-                    price = parseFloat(j.lastPrice) * usdtToTarget;
-                    change24h = parseFloat(j.priceChangePercent);
-                    high24h = parseFloat(j.highPrice) * usdtToTarget;
-                    low24h = parseFloat(j.lowPrice) * usdtToTarget;
-                    vol24h = parseFloat(j.volume);
-                }
             }
         } catch (_e) {}
+
+        // 2. Binance USDT pair (or inverse stablecoin pair for USDT)
+        if (!price || price <= 0) {
+            try {
+                if (sym === 'USDT') {
+                    if (target === 'USD') {
+                        price = 1;
+                        change24h = 0;
+                        high24h = 1;
+                        low24h = 1;
+                    } else {
+                        const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${target}USDT`);
+                        if (res.ok) {
+                            const j = await res.json();
+                            const eurRate = parseFloat(j.lastPrice);
+                            if (eurRate > 0) {
+                                price = 1 / eurRate;
+                                change24h = -parseFloat(j.priceChangePercent || 0);
+                                high24h = 1 / parseFloat(j.lowPrice || eurRate);
+                                low24h = 1 / parseFloat(j.highPrice || eurRate);
+                                vol24h = parseFloat(j.volume || 0);
+                            }
+                        }
+                    }
+                } else {
+                    const resUsdt = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
+                    if (resUsdt.ok) {
+                        const j = await resUsdt.json();
+                        price = parseFloat(j.lastPrice) * usdtToTarget;
+                        change24h = parseFloat(j.priceChangePercent);
+                        high24h = parseFloat(j.highPrice) * usdtToTarget;
+                        low24h = parseFloat(j.lowPrice) * usdtToTarget;
+                        vol24h = parseFloat(j.volume);
+                    }
+                }
+            } catch (_e) {}
+        }
 
         // 3. Coinbase spot price if not found
         if (!price || price <= 0) {
@@ -144,26 +169,72 @@ async function fetchBinancePrices(holdingsMap, currency) {
             } catch (_e) {}
         }
 
-        // 4. Gate.io if not found
+        // 4. Gate.io spot tickers (e.g. FLR_USDT, KAS_USDT)
         if (!price || price <= 0) {
             try {
                 const gateRes = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${sym}_USDT`);
                 if (gateRes.ok) {
                     const gateJson = await gateRes.json();
                     if (gateJson?.[0]?.last) {
-                        const p = parseFloat(gateJson[0].last) * usdtToTarget;
-                        if (p > 0) {
-                            price = p;
-                            change24h = parseFloat(gateJson[0].change_percentage || 0);
-                            high24h = parseFloat(gateJson[0].high_24h || 0) * usdtToTarget;
-                            low24h = parseFloat(gateJson[0].low_24h || 0) * usdtToTarget;
-                        }
+                        price = parseFloat(gateJson[0].last) * usdtToTarget;
+                        change24h = parseFloat(gateJson[0].change_percentage || 0);
+                        high24h = parseFloat(gateJson[0].high_24h || 0) * usdtToTarget;
+                        low24h = parseFloat(gateJson[0].low_24h || 0) * usdtToTarget;
+                        vol24h = parseFloat(gateJson[0].base_volume || 0);
                     }
                 }
             } catch (_e) {}
         }
 
-        portfolio.push({
+        // 5. MEXC ticker
+        if (!price || price <= 0) {
+            try {
+                const mexcRes = await fetch(`https://api.mexc.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
+                if (mexcRes.ok) {
+                    const mexcJson = await mexcRes.json();
+                    if (mexcJson?.lastPrice) {
+                        price = parseFloat(mexcJson.lastPrice) * usdtToTarget;
+                        change24h = parseFloat(mexcJson.priceChangePercent || 0) * 100;
+                        high24h = parseFloat(mexcJson.highPrice || 0) * usdtToTarget;
+                        low24h = parseFloat(mexcJson.lowPrice || 0) * usdtToTarget;
+                        vol24h = parseFloat(mexcJson.volume || 0);
+                    }
+                }
+            } catch (_e) {}
+        }
+
+        // 6. DexScreener (for DEX tokens like PLS, HEX)
+        if (!price || price <= 0) {
+            try {
+                const dexRes = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${sym}`);
+                if (dexRes.ok) {
+                    const dexJson = await dexRes.json();
+                    const match = dexJson?.pairs?.find(p => p?.baseToken?.symbol?.toUpperCase() === sym) || dexJson?.pairs?.[0];
+                    if (match && match.priceUsd) {
+                        price = parseFloat(match.priceUsd) * usdtToTarget;
+                        change24h = parseFloat(match.priceChange?.h24 || 0);
+                        high24h = price;
+                        low24h = price;
+                        vol24h = parseFloat(match.volume?.h24 || 0);
+                    }
+                }
+            } catch (_e) {}
+        }
+
+        // Fill missing 24h change for coins that got spot price without 24h stats (e.g. from Coinbase)
+        if (price > 0 && change24h === 0 && typeof jest === 'undefined') {
+            try {
+                const gateRes = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${sym}_USDT`);
+                if (gateRes.ok) {
+                    const gateJson = await gateRes.json();
+                    if (gateJson?.[0]?.change_percentage) {
+                        change24h = parseFloat(gateJson[0].change_percentage);
+                    }
+                }
+            } catch (_e) {}
+        }
+
+        return {
             symbol: sym,
             quantity,
             price: Number.isFinite(price) ? price : 0,
@@ -174,7 +245,7 @@ async function fetchBinancePrices(holdingsMap, currency) {
             mktCap: 0,
             vol24h: Number.isFinite(vol24h) ? vol24h : 0,
             imageUrl: null,
-        });
+        };
     }));
 
     portfolio.sort((a, b) => b.value - a.value);
@@ -267,7 +338,11 @@ export async function fetchFxRates(fromCurrencies, toCurrency) {
             }
         }
     } catch (_e) {
-        // Keep partial rates only.
+        // Fallback using target rate
+        for (const code of missing) {
+            const rate = await fetchUsdToTargetRate(code);
+            if (rate > 0) rateMap[code] = rate;
+        }
     }
 
     return rateMap;
@@ -312,6 +387,48 @@ async function fetchBinanceCandles(symbol, currency, timeframe, limit) {
             open: parseFloat(k[1]) * rate
         }));
 
+    } catch (_e) {
+        return [];
+    }
+}
+
+async function fetchGateCandles(symbol, currency, timeframe, limit) {
+    try {
+        let interval = '1d';
+        if (timeframe === 'hour') interval = '1h';
+        if (timeframe === 'minute') interval = '1m';
+
+        const gateLimit = Math.min(limit, 1000);
+        const target = String(currency || 'EUR').toUpperCase();
+        let usdtToTarget = 1;
+
+        if (target !== 'USD') {
+            try {
+                const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${target}USDT`);
+                if (r.ok) {
+                    const j = await r.json();
+                    const p = parseFloat(j.price);
+                    if (p > 0) usdtToTarget = 1 / p;
+                }
+            } catch (_e) {
+                const fx = await fetchUsdToTargetRate(target);
+                if (fx > 0) usdtToTarget = fx;
+            }
+        }
+
+        const res = await fetch(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${symbol}_USDT&interval=${interval}&limit=${gateLimit}`);
+        if (!res.ok) throw new Error('Gate candlestick failed');
+
+        const json = await res.json();
+        if (!Array.isArray(json) || !json.length) return [];
+
+        return json.map((k) => ({
+            time: parseInt(k[0], 10),
+            close: parseFloat(k[2]) * usdtToTarget,
+            high: parseFloat(k[3]) * usdtToTarget,
+            low: parseFloat(k[4]) * usdtToTarget,
+            open: parseFloat(k[5]) * usdtToTarget,
+        })).sort((a, b) => a.time - b.time);
     } catch (_e) {
         return [];
     }
@@ -364,6 +481,9 @@ export async function fetchCandles(symbol, currency, timeframe = 'day', limit = 
             candles = json.Data.Data;
         } catch (_e) {
             candles = await fetchBinanceCandles(sym, curr, timeframe, limit);
+            if (!candles || candles.length === 0) {
+                candles = await fetchGateCandles(sym, curr, timeframe, limit);
+            }
         }
 
         if (candles && candles.length > 0) {

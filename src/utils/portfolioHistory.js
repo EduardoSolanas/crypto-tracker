@@ -1,7 +1,6 @@
 import { toLinePoint } from './chartContracts';
 
 // Named constants for magic numbers
-const SIGNIFICANT_VALUE_THRESHOLD = 10;  // Minimum asset value to fetch history for
 const MIN_QUANTITY = 0.00000001;  // Dust threshold for filtering tiny amounts
 
 export const computePortfolioHistory = async ({
@@ -27,11 +26,13 @@ export const computePortfolioHistory = async ({
         };
     }
 
-    // FILTER: Only fetch history for assets with value > SIGNIFICANT_VALUE_THRESHOLD
+    // Include all active symbols in portfolio
     const significantSymbols = new Set();
     if (currentPortfolio) {
         currentPortfolio.forEach(p => {
-            if (p.value > SIGNIFICANT_VALUE_THRESHOLD) significantSymbols.add(p.symbol);
+            if (p.symbol && (p.value > 0 || p.quantity > MIN_QUANTITY)) {
+                significantSymbols.add(p.symbol);
+            }
         });
     }
 
@@ -223,10 +224,13 @@ export const computePortfolioHistory = async ({
     const getAssetPerformance = (item, history, r, rangeStart) => {
         const { price, quantity, change24h } = item;
         if (r === '1D') {
-            const startPrice = price / (1 + (change24h / 100));
-            return { val: (price - startPrice) * quantity, pct: change24h };
+            const startPrice = price / (1 + ((change24h || 0) / 100));
+            return { val: (price - startPrice) * quantity, pct: change24h || 0 };
         }
-        if (!history || history.length === 0) return { val: 0, pct: 0 };
+        if (!history || history.length === 0) {
+            const startPrice = price / (1 + ((change24h || 0) / 100));
+            return { val: (price - startPrice) * quantity, pct: change24h || 0 };
+        }
 
         // Find the candle closest to rangeStart (within tolerance)
         // Look for candle at or after rangeStart, or closest before it
@@ -245,7 +249,6 @@ export const computePortfolioHistory = async ({
             }
         }
 
-        // bestCandle is guaranteed to be set if history.length > 0
         if (!bestCandle) return { val: 0, pct: 0 };
 
         const startPrice = bestCandle.open || bestCandle.close || 0;

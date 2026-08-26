@@ -527,7 +527,15 @@ export default function HomeScreen() {
         );
     }
 
-    const isHeroPositive = (delta?.val ?? 0) >= 0;
+    const heroVal = delta?.val ?? 0;
+    const heroPct = delta?.pct ?? 0;
+    const isHeroPositive = heroVal > 0 || (heroVal === 0 && heroPct > 0.001);
+    const isHeroNegative = heroVal < 0 || (heroVal === 0 && heroPct < -0.001);
+    const heroColor = isHeroPositive
+        ? (colors?.success || '#22c55e')
+        : isHeroNegative
+            ? (colors?.error || '#ef4444')
+            : (colors?.textSecondary || '#999');
 
     return (
         <View style={{ flex: 1, backgroundColor: colors?.background || '#000' }}>
@@ -539,7 +547,7 @@ export default function HomeScreen() {
                 }
             >
                 {/* Header / Hero */}
-                <View style={[styles.header, { borderBottomColor: colors?.border || '#222' }]}>
+                <View style={styles.header}>
                     <View style={{ flex: 1 }}>
                         <Text style={[styles.subTitle, { color: colors?.textSecondary || '#999' }]}>
                             {tr('home.totalWorth', 'Total Worth')}
@@ -550,25 +558,18 @@ export default function HomeScreen() {
 
                         {/* Range PnL */}
                         <View style={styles.pnlRow}>
-                            <View
-                                style={[
-                                    styles.pnlPill,
-                                    { backgroundColor: isHeroPositive ? (colors?.successBg || 'rgba(34,197,94,0.2)') : (colors?.errorBg || 'rgba(239,68,68,0.2)') }
-                                ]}
-                            >
-                                <Text style={[
-                                    styles.pnlValText,
-                                    { color: isHeroPositive ? (colors?.success || '#22c55e') : (colors?.error || '#ef4444') }
-                                ]}>
-                                    {isHeroPositive ? '+' : ''}{formatMoney(delta?.val || 0, currency)}
-                                </Text>
-                                <Text style={[
-                                    styles.pnlPctText,
-                                    { color: isHeroPositive ? (colors?.success || '#22c55e') : (colors?.error || '#ef4444') }
-                                ]}>
-                                    ({isHeroPositive ? '+' : ''}{Number(delta?.pct || 0).toFixed(2)}%)
-                                </Text>
-                            </View>
+                            <Text style={[
+                                styles.pnlValText,
+                                { color: heroColor }
+                            ]}>
+                                {isHeroPositive ? '+' : ''}{formatMoney(heroVal, currency)}
+                            </Text>
+                            <Text style={[
+                                styles.pnlPctText,
+                                { color: heroColor }
+                            ]}>
+                                ({isHeroPositive ? '+' : ''}{Number(heroPct).toFixed(2)}%)
+                            </Text>
                         </View>
                     </View>
 
@@ -718,7 +719,15 @@ export default function HomeScreen() {
                                 deltaData = { val: valDelta, pct };
                             }
 
-                            const isPositive = (deltaData.val || 0) >= 0;
+                            const itemValDelta = deltaData?.val || 0;
+                            const itemPctDelta = deltaData?.pct || 0;
+                            const isPositive = itemValDelta > 0 || (itemValDelta === 0 && itemPctDelta > 0.001);
+                            const isNegative = itemValDelta < 0 || (itemValDelta === 0 && itemPctDelta < -0.001);
+                            const itemColor = isPositive
+                                ? (colors?.success || '#22c55e')
+                                : isNegative
+                                    ? (colors?.error || '#ef4444')
+                                    : (colors?.textSecondary || '#999');
 
                             return (
                                 <TouchableOpacity
@@ -748,19 +757,19 @@ export default function HomeScreen() {
                                         </Text>
                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                                             <Text style={{
-                                                color: isPositive ? (colors?.success || '#22c55e') : (colors?.error || '#ef4444'),
+                                                color: itemColor,
                                                 fontSize: 13,
                                                 fontWeight: '600'
                                             }}>
-                                                {isPositive ? '+' : ''}{formatMoney(deltaData.val, currency)}
+                                                {isPositive ? '+' : ''}{formatMoney(itemValDelta, currency)}
                                             </Text>
                                             <Text style={{
-                                                color: isPositive ? (colors?.success || '#22c55e') : (colors?.error || '#ef4444'),
+                                                color: itemColor,
                                                 fontSize: 13,
                                                 fontWeight: '600',
                                                 marginLeft: 4
                                             }}>
-                                                ({isPositive ? '+' : ''}{Number(deltaData?.pct || 0).toFixed(2)}%)
+                                                ({isPositive ? '+' : ''}{Number(itemPctDelta).toFixed(2)}%)
                                             </Text>
                                         </View>
                                     </View>
@@ -808,8 +817,7 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         paddingHorizontal: 20,
         paddingTop: 56,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
+        paddingBottom: 12,
     },
     subTitle: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
     totalText: { fontSize: 34, fontWeight: '800', marginVertical: 4 },
@@ -818,15 +826,7 @@ const styles = StyleSheet.create({
     pnlRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 6,
-        gap: 8,
-    },
-    pnlPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 8,
+        marginTop: 2,
     },
     pnlValText: { fontSize: 14, fontWeight: '700', marginRight: 4 },
     pnlPctText: { fontSize: 13, fontWeight: '600' },

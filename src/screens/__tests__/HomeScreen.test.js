@@ -89,6 +89,14 @@ jest.mock('../../components/CoinIcon', () => {
     };
 });
 
+jest.mock('../../components/CryptoGraph', () => {
+    const React = require('react');
+    const { View } = require('react-native');
+    return function MockCryptoGraph() {
+        return <View testID="mock-crypto-graph" />;
+    };
+});
+
 describe('HomeScreen - Small Balances Toggle', () => {
     const mockPortfolio = [
         { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
@@ -444,5 +452,31 @@ describe('HomeScreen Empty State & Zero-Transaction Handling', () => {
         expect(queryByText('BTC')).toBeNull();
         expect(queryByText('DOGE')).toBeNull();
         expect(queryByText(/Small Balances/i)).toBeNull();
+    });
+});
+
+describe('HomeScreen Hero PnL & Graph Container Styling', () => {
+    it('renders hero PnL as plain text without container and renders borderless header', async () => {
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+        const portfolioHistory = require('../../utils/portfolioHistory');
+
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
+        db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([{ symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 }]);
+        portfolioHistory.computePortfolioHistory.mockResolvedValue({
+            chartData: [{ timestamp: 1, value: 48000 }, { timestamp: 2, value: 50000 }],
+            delta: { val: 2000, pct: 4.17 },
+            chartColor: '#22c55e',
+            coinDeltas: { BTC: { val: 2000, pct: 4.17 } },
+        });
+
+        const { getByText, getAllByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
+            expect(getAllByText(/\+.*2,?000\.00/).length).toBeGreaterThanOrEqual(1);
+            expect(getAllByText(/\(\+4\.17%\)/).length).toBeGreaterThanOrEqual(1);
+        });
     });
 });

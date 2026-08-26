@@ -448,8 +448,17 @@ export default function CoinScreen() {
                                     <Text style={[styles.bigPrice, { color: colors.text }]}>
                                         {formatMoney(coin?.price || 0, currency)}
                                     </Text>
-                                    <Text style={[styles.priceChange, { color: (coin?.change24h || 0) >= 0 ? colors.success : colors.error }]}>
-                                        {(coin?.change24h || 0) >= 0 ? '+' : ''}{formatMoney((coin?.price || 0) * ((coin?.change24h || 0) / 100), currency)} ({(coin?.change24h || 0) >= 0 ? '+' : ''}{(coin?.change24h || 0).toFixed(2)}%)
+                                    <Text style={[
+                                        styles.priceChange,
+                                        {
+                                            color: (coin?.change24h || 0) > 0
+                                                ? colors.success
+                                                : (coin?.change24h || 0) < 0
+                                                    ? colors.error
+                                                    : colors.textSecondary
+                                        }
+                                    ]}>
+                                        {(coin?.change24h || 0) > 0 ? '+' : ''}{formatMoney((coin?.price || 0) * ((coin?.change24h || 0) / 100), currency)} ({(coin?.change24h || 0) > 0 ? '+' : ''}{(coin?.change24h || 0).toFixed(2)}%)
                                     </Text>
                                 </View>
                                 <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>

@@ -6,16 +6,19 @@
  */
 export const formatMoney = (val, cur = 'EUR') => {
     const v = Number(val || 0);
+    const abs = Math.abs(v);
+    const maxDigits = (abs > 0 && abs < 0.0001) ? 6 : (abs > 0 && abs < 0.01) ? 4 : 2;
+    const minDigits = (abs > 0 && abs < 0.01) ? maxDigits : 2;
 
     try {
         return new Intl.NumberFormat(undefined, {
             style: 'currency',
             currency: cur || 'EUR',
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
+            minimumFractionDigits: minDigits,
+            maximumFractionDigits: maxDigits,
         }).format(v);
     } catch (_e) {
-        return `${cur} ${v.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+        return `${cur} ${v.toFixed(maxDigits).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
     }
 };
 
