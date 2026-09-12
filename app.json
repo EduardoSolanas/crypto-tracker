@@ -49,8 +49,17 @@
       ],
       "expo-localization",
       "expo-sqlite",
-      "expo-image",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "useLegacyPackaging": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -340,7 +340,6 @@ export default function HomeScreen() {
 
                 // Refresh independently so cached values remain visible while APIs resolve.
                 if (canShowCache) {
-                    setLoading(true);
                     smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency)
                         .then(async (freshPortfolio) => {
                             if (!freshPortfolio) return;
@@ -352,8 +351,7 @@ export default function HomeScreen() {
                             }
                             prewarmRanges(allTxns, freshPortfolio, selectedCurrency);
                         })
-                        .catch((e) => debugLog('[Startup refresh] Error', e))
-                        .finally(() => setLoading(false));
+                        .catch((e) => debugLog('[Startup refresh] Error', e));
                 } else {
                     const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
                     setPortfolio(p);

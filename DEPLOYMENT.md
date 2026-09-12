@@ -35,6 +35,16 @@ Create it in Expo dashboard:
    - `auto_submit=true` when store credentials are already configured
 
 ## Branding assets
+Android release builds enable R8 code shrinking, resource shrinking, and compressed
+native libraries through `expo-build-properties` in `app.json`. Keep these settings
+in the Expo config: the ignored local `android/` directory is regenerated in CI.
+Native-library compression reduces the APK download size, but Android extracts
+those libraries during installation, so installed size does not fall by the same
+amount. All default CPU architectures remain supported. The production Play Store
+bundle allows Google Play to deliver only the libraries needed by each device;
+the preview APK is universal. Measure the next native build to confirm its size
+and smoke-test launch, charts, CSV import, and sharing with release shrinking enabled.
+
 Android uses a transparent native splash drawable on a dark background, avoiding
 the system's circular crop of the branding artwork. While the home screen loads,
 `StartupScreen` displays `assets/images/branding-source.png` in a full-screen,
