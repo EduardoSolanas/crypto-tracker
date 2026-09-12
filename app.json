@@ -35,6 +35,13 @@
           "imageWidth": 320,
           "resizeMode": "contain",
           "backgroundColor": "#0F2B4A",
+          "android": {
+            "backgroundColor": "#070F1C",
+            "drawable": {
+              "icon": "./assets/images/android-splash-empty.xml",
+              "darkIcon": "./assets/images/android-splash-empty.xml"
+            }
+          },
           "dark": {
             "backgroundColor": "#070F1C"
           }

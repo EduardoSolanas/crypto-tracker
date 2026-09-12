@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     ActivityIndicator,
     Alert,
+    Platform,
     RefreshControl,
     ScrollView,
     StatusBar,
@@ -25,6 +26,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CoinIcon from '../components/CoinIcon';
+import StartupScreen from '../components/StartupScreen';
 import CryptoGraph from '../components/CryptoGraph';
 import { clearCandleCache, fetchCandles, fetchPortfolioPrices } from '../cryptoCompare';
 import { computeHoldingsFromTxns, parseDeltaCsvWithReport } from '../csv';
@@ -69,6 +71,10 @@ export default function HomeScreen() {
     const didBootstrapRef = useRef(false);
     const rangeCacheRef = useRef(new Map());
     const txnsRef = useRef([]);
+    const activeRangeRef = useRef(range);
+    const activeCurrencyRef = useRef(currency);
+    useEffect(() => { activeRangeRef.current = range; }, [range]);
+    useEffect(() => { activeCurrencyRef.current = currency; }, [currency]);
 
     const totalValue = useMemo(
         () => (portfolio ? portfolio.reduce((acc, c) => acc + (c.value || 0), 0) : 0),
@@ -174,10 +180,14 @@ export default function HomeScreen() {
 
             rangeCacheRef.current.set(cacheKey, { chartData, delta, chartColor, coinDeltas });
 
-            setChartData(chartData);
-            setDelta(delta);
-            setChartColor(chartColor);
-            setCoinDeltas(coinDeltas);
+            // A background request may finish after the user changes range/currency.
+            // Keep its cache entry, but only paint it if it is still selected.
+            if (activeRangeRef.current === selectedRange && activeCurrencyRef.current === selectedCurrency) {
+                setChartData(chartData);
+                setDelta(delta);
+                setChartColor(chartColor);
+                setCoinDeltas(coinDeltas);
+            }
 
             if (currentPortfolio?.length && selectedRange === '1D') {
                 const rangesObj = Object.fromEntries(rangeCacheRef.current.entries());
@@ -185,11 +195,11 @@ export default function HomeScreen() {
             }
         } catch (e) {
             if (globalThis.__DEV__) console.error('[computeHistory] Error', e);
-            if (!cached) {
+            if (!cached && activeRangeRef.current === selectedRange && activeCurrencyRef.current === selectedCurrency) {
                 setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
             }
         } finally {
-            if (!isBackground) {
+            if (!isBackground && activeRangeRef.current === selectedRange && activeCurrencyRef.current === selectedCurrency) {
                 setGraphLoading(false);
             }
         }
@@ -247,6 +257,7 @@ export default function HomeScreen() {
     }, []);
 
     const handleRangeSelect = useCallback((r) => {
+        activeRangeRef.current = r;
         setRange(r);
         const cacheKey = `${r}_${currency}`;
         const cached = rangeCacheRef.current.get(cacheKey);
@@ -269,26 +280,6 @@ export default function HomeScreen() {
         }
     }, [computeHistory, currency, portfolio]);
 
-    // Recompute graph whenever range/currency/portfolio changes.
-    useEffect(() => {
-        if (!portfolio || portfolio.length === 0) return;
-        const cacheKey = `${range}_${currency}`;
-        if (rangeCacheRef.current.has(cacheKey)) {
-            return;
-        }
-        const txs = txnsRef.current && txnsRef.current.length > 0 ? txnsRef.current : null;
-        if (txs) {
-            computeHistory(txs, portfolio, currency, range);
-        } else {
-            getAllTransactions().then((all) => {
-                txnsRef.current = all || [];
-                if (all && all.length > 0) {
-                    computeHistory(all, portfolio, currency, range);
-                }
-            });
-        }
-    }, [computeHistory, currency, portfolio, range]);
-
     useEffect(() => {
         if (didBootstrapRef.current) return;
         didBootstrapRef.current = true;
@@ -299,6 +290,7 @@ export default function HomeScreen() {
                 const savedCurrency = await getMeta('currency');
                 selectedCurrency = savedCurrency || 'EUR';
                 setCurrency(selectedCurrency);
+                activeCurrencyRef.current = selectedCurrency;
 
                 const allTxns = await getAllTransactions();
                 txnsRef.current = allTxns || [];
@@ -317,16 +309,57 @@ export default function HomeScreen() {
                 }
 
                 const cached = await loadCache(selectedCurrency);
-                if (cached?.rangesMap) {
-                    Object.entries(cached.rangesMap).forEach(([k, v]) => {
-                        rangeCacheRef.current.set(k, v);
-                    });
+                // Cache-first startup: display a cache that still matches the current
+                // holdings immediately, then refresh prices and history in the background.
+                const cachedMap = new Map((cached?.portfolio || []).map(item => [item.symbol, item]));
+                const cachedPortfolio = symbols
+                    .map(symbol => cachedMap.get(symbol))
+                    .filter(item => item && Math.abs(Number(item.quantity) - holdings[item.symbol]) <= 0.00000001);
+                const canShowCache = cachedPortfolio.length === symbols.length;
+                const cachedSymbols = new Set((cached?.portfolio || []).map(item => item.symbol));
+                const holdingsMatchCache = canShowCache && cachedSymbols.size === symbols.length && symbols.every(symbol => cachedSymbols.has(symbol));
+                // History is tied to the holdings snapshot; discard it when holdings changed.
+                if (holdingsMatchCache && cached?.rangesMap) {
+                    Object.entries(cached.rangesMap).forEach(([k, v]) => rangeCacheRef.current.set(k, v));
                 }
-                const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
+                if (canShowCache) {
+                    cachedPortfolio.sort((a, b) => b.value - a.value);
+                    setPortfolio(cachedPortfolio);
+                    const cachedHistory = holdingsMatchCache && cached?.rangesMap?.[`1D_${selectedCurrency}`];
+                    if (cachedHistory) {
+                        setChartData(cachedHistory.chartData || []);
+                        setDelta(cachedHistory.delta || { val: 0, pct: 0 });
+                        setChartColor(cachedHistory.chartColor || '#22c55e');
+                        setCoinDeltas(cachedHistory.coinDeltas || {});
+                    } else if (holdingsMatchCache && cached?.chartData && cached?.range === '1D') {
+                        setChartData(cached.chartData);
+                        setDelta(cached.delta || { val: 0, pct: 0 });
+                    }
+                    setBooting(false);
+                }
 
-                setPortfolio(p);
-                await computeHistory(allTxns, p, selectedCurrency, '1D');
-                prewarmRanges(allTxns, p, selectedCurrency);
+                // Refresh independently so cached values remain visible while APIs resolve.
+                if (canShowCache) {
+                    setLoading(true);
+                    smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency)
+                        .then(async (freshPortfolio) => {
+                            if (!freshPortfolio) return;
+                            setPortfolio(freshPortfolio);
+                            const refreshedRange = activeRangeRef.current;
+                            await computeHistory(allTxns, freshPortfolio, selectedCurrency, refreshedRange, true);
+                            if (refreshedRange !== '1D') {
+                                await computeHistory(allTxns, freshPortfolio, selectedCurrency, '1D', true);
+                            }
+                            prewarmRanges(allTxns, freshPortfolio, selectedCurrency);
+                        })
+                        .catch((e) => debugLog('[Startup refresh] Error', e))
+                        .finally(() => setLoading(false));
+                } else {
+                    const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
+                    setPortfolio(p);
+                    await computeHistory(allTxns, p, selectedCurrency, activeRangeRef.current);
+                    prewarmRanges(allTxns, p, selectedCurrency);
+                }
             } catch (e) {
                 const allTxns = await getAllTransactions().catch(() => []);
                 const loaded = allTxns.length > 0 ? await loadCache(selectedCurrency) : null;
@@ -446,7 +479,7 @@ export default function HomeScreen() {
     // Filter & Sort for visible portfolio
     const visiblePortfolio = useMemo(() => {
         if (!portfolio) return [];
-        let list = portfolio.filter(p => showSmallBalances || p.value >= 10);
+        let list = portfolio.filter(p => showSmallBalances || (p.value || 0) >= 10);
 
         if (searchQuery.trim()) {
             const q = searchQuery.trim().toLowerCase();
@@ -454,26 +487,49 @@ export default function HomeScreen() {
         }
 
         return [...list].sort((a, b) => {
+            const aVal = Number.isFinite(a?.value) ? a.value : 0;
+            const bVal = Number.isFinite(b?.value) ? b.value : 0;
+            const aHasNormalVal = aVal >= 10;
+            const bHasNormalVal = bVal >= 10;
+            const aHasZeroVal = aVal <= 0 || !a?.price || a.price <= 0;
+            const bHasZeroVal = bVal <= 0 || !b?.price || b.price <= 0;
+
+            // 1. Currencies with normal balances (>= 10) always appear before small/zero balances (< 10)
+            if (aHasNormalVal !== bHasNormalVal) {
+                return aHasNormalVal ? -1 : 1;
+            }
+
+            // 2. Currencies with small balances (> 0) appear before currencies with NO value (<= 0)
+            if (aHasZeroVal !== bHasZeroVal) {
+                return aHasZeroVal ? 1 : -1;
+            }
+
+            // 3. Sort within the same tier by selected sort criteria
             if (sortBy === 'change') {
-                return (b.change24h || 0) - (a.change24h || 0);
+                const aChange = Number.isFinite(a?.change24h) ? a.change24h : 0;
+                const bChange = Number.isFinite(b?.change24h) ? b.change24h : 0;
+                return bChange - aChange;
             }
             if (sortBy === 'name') {
-                return a.symbol.localeCompare(b.symbol);
+                return (a?.symbol || '').localeCompare(b?.symbol || '');
             }
             if (sortBy === 'quantity') {
-                return (b.quantity || 0) - (a.quantity || 0);
+                const aQty = Number.isFinite(a?.quantity) ? a.quantity : 0;
+                const bQty = Number.isFinite(b?.quantity) ? b.quantity : 0;
+                return bQty - aQty;
             }
-            return (b.value || 0) - (a.value || 0);
+            return bVal - aVal;
         });
     }, [portfolio, showSmallBalances, searchQuery, sortBy]);
 
     const hasSmallBalances = useMemo(
-        () => (portfolio ? portfolio.some(p => p.value < 10) : false),
+        () => (portfolio ? portfolio.some(p => (p.value || 0) < 10) : false),
         [portfolio]
     );
-    const hiddenCount = (portfolio?.length || 0) - (portfolio ? portfolio.filter(p => p.value >= 10).length : 0);
+    const hiddenCount = (portfolio?.length || 0) - (portfolio ? portfolio.filter(p => (p.value || 0) >= 10).length : 0);
 
     if (booting) {
+        if (Platform.OS === 'android') return <StartupScreen />;
         return (
             <SafeAreaView style={[{ flex: 1, backgroundColor: colors?.background || '#000' }, styles.centerContent]}>
                 <ActivityIndicator color={colors?.text || '#fff'} size="large" />

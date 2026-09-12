@@ -35,6 +35,18 @@ Create it in Expo dashboard:
    - `auto_submit=true` when store credentials are already configured
 
 ## Branding assets
+Android uses a transparent native splash drawable on a dark background, avoiding
+the system's circular crop of the branding artwork. While the home screen loads,
+`StartupScreen` displays `assets/images/branding-source.png` in a full-screen,
+opaque view. Aspect-fit scaling keeps the complete CryptoTracker name visible,
+with a dark background filling any remaining space. No artificial delay is added.
+
+Verify launch-screen changes in a new native preview or production build (for
+example, `npx eas-cli build --platform android --profile preview`). OTA updates and
+Metro reloads cannot update the native launch screen. Expo Go and development
+clients have their own loading overlays, which can display a circular app icon
+and do not accurately preview this screen.
+
 Regenerate professional icon/splash assets with:
 - `npm run generate:brand-assets`
 

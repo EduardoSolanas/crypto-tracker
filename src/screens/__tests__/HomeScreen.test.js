@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 import HomeScreen from '../HomeScreen';
 
 // Mock dependencies
@@ -332,6 +332,64 @@ describe('HomeScreen - Small Balances Toggle', () => {
     });
 });
 
+describe('HomeScreen cached-first startup', () => {
+    const txns = [{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }];
+    const cached = { timestamp: Date.now() - 2 * 60 * 60 * 1000, range: '1D', chartData: [], delta: { val: 0, pct: 0 }, portfolio: [{ symbol: 'BTC', quantity: 1, price: 100, value: 100, change24h: 0 }] };
+
+    beforeEach(() => {
+        const db = require('../../db');
+        db.getAllTransactions.mockResolvedValue(txns);
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
+        db.loadCache.mockResolvedValue(cached);
+    });
+
+    it('shows stale cached prices while refresh is pending, then shows fresh values', async () => {
+        let resolve;
+        const pending = new Promise(r => { resolve = r; });
+        require('../../cryptoCompare').fetchPortfolioPrices.mockReturnValue(pending);
+        const { getByText, getAllByText } = render(<HomeScreen />);
+        await waitFor(() => expect(getByText('BTC')).toBeTruthy());
+        expect(getAllByText(/€100\.00/).length).toBeGreaterThan(0);
+        resolve([{ symbol: 'BTC', quantity: 1, price: 200, value: 200, change24h: 0 }]);
+        await waitFor(() => expect(getAllByText(/€200\.00/).length).toBeGreaterThan(0));
+    });
+
+    it('keeps cached balance when refresh rejects', async () => {
+        require('../../cryptoCompare').fetchPortfolioPrices.mockRejectedValue(new Error('offline'));
+        const { getByText, getAllByText } = render(<HomeScreen />);
+        await waitFor(() => expect(getByText('BTC')).toBeTruthy());
+        expect(getAllByText(/€100\.00/).length).toBeGreaterThan(0);
+    });
+
+    it('keeps the selected week visible when the background day chart finishes', async () => {
+        const history = require('../../utils/portfolioHistory');
+        const day = { chartData: [], delta: { val: 11, pct: 11 }, chartColor: '#22c55e', coinDeltas: {} };
+        const week = { ...day, delta: { val: 22, pct: 22 } };
+        require('../../db').loadCache.mockResolvedValue({ ...cached, rangesMap: { '1D_EUR': day, '1W_EUR': week } });
+        require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
+        let finishDay;
+        history.computePortfolioHistory.mockImplementationOnce(() => new Promise(resolve => { finishDay = resolve; }));
+        const { getByText, getAllByText, queryByText } = render(<HomeScreen />);
+        await waitFor(() => expect(finishDay).toBeDefined());
+        fireEvent.press(getByText('1W'));
+        await act(async () => { finishDay({ ...day, delta: { val: 33, pct: 33 } }); });
+        expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0);
+        expect(queryByText(/33\.00%/)).toBeNull();
+    });
+
+    it('renders immediately when a cached dust coin has zero price', async () => {
+        const db = require('../../db');
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1, DUST: 1 });
+        db.getAllTransactions.mockResolvedValue(txns.concat({ symbol: 'DUST', amount: 1, way: 'BUY' }));
+        db.loadCache.mockResolvedValue({ ...cached, portfolio: cached.portfolio.concat({ symbol: 'DUST', quantity: 1, price: 0, value: 0 }) });
+        let resolve;
+        require('../../cryptoCompare').fetchPortfolioPrices.mockReturnValue(new Promise(r => { resolve = r; }));
+        const { getByText } = render(<HomeScreen />);
+        await waitFor(() => expect(getByText('BTC')).toBeTruthy());
+        resolve([]);
+    });
+});
+
 describe('HomeScreen graph ranges', () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -477,6 +535,51 @@ describe('HomeScreen Hero PnL & Graph Container Styling', () => {
             expect(getByText('BTC')).toBeTruthy();
             expect(getAllByText(/\+.*2,?000\.00/).length).toBeGreaterThanOrEqual(1);
             expect(getAllByText(/\(\+4\.17%\)/).length).toBeGreaterThanOrEqual(1);
+        });
+    });
+});
+
+describe('HomeScreen Zero-Value and Small Balance Placement', () => {
+    it('moves zero-value currencies and small balances to the bottom below normal balances', async () => {
+        jest.clearAllMocks();
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+
+        db.loadCache.mockResolvedValue(null);
+
+        const mockPortfolio = [
+            { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
+            { symbol: 'ZERO_VAL', quantity: 1000, price: 0, value: 0, change24h: 0 },
+            { symbol: 'ETH', quantity: 10, price: 3000, value: 30000, change24h: 1.5 },
+            { symbol: 'TINY', quantity: 10, price: 0.2, value: 2, change24h: 5.0 },
+        ];
+
+        db.getHoldingsMap.mockResolvedValue({ BTC: 1, ZERO_VAL: 1000, ETH: 10, TINY: 10 });
+        db.getAllTransactions.mockResolvedValue([
+            { symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'ZERO_VAL', amount: 1000, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'ETH', amount: 10, way: 'BUY', date_iso: '2024-01-01' },
+            { symbol: 'TINY', amount: 10, way: 'BUY', date_iso: '2024-01-01' },
+        ]);
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue(mockPortfolio);
+
+        const { getByText, queryByText } = render(<HomeScreen />);
+
+        // By default, only normal balances (>= 10) are visible; ZERO_VAL and TINY are hidden
+        await waitFor(() => {
+            expect(getByText('BTC')).toBeTruthy();
+            expect(getByText('ETH')).toBeTruthy();
+            expect(queryByText('ZERO_VAL')).toBeNull();
+            expect(queryByText('TINY')).toBeNull();
+            expect(getByText(/Show 2 Small Balances/i)).toBeTruthy();
+        });
+
+        // Expand small balances
+        fireEvent.press(getByText(/Show 2 Small Balances/i));
+
+        await waitFor(() => {
+            expect(getByText('ZERO_VAL')).toBeTruthy();
+            expect(getByText('TINY')).toBeTruthy();
         });
     });
 });
