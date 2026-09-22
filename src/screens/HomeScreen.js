@@ -60,7 +60,7 @@ export default function HomeScreen() {
     const [portfolio, setPortfolio] = useState(null);
     const [chartData, setChartData] = useState([]);
     const [range, setRange] = useState('1D');
-    const [graphLoading, setGraphLoading] = useState(false);
+    const [graphLoading, setGraphLoading] = useState(true);
     const [graphError, setGraphError] = useState('');
     const [chartColor, setChartColor] = useState('#22c55e');
     const [delta, setDelta] = useState({ val: 0, pct: 0 });
@@ -70,6 +70,8 @@ export default function HomeScreen() {
     const [showSmallBalances, setShowSmallBalances] = useState(false);
     const didBootstrapRef = useRef(false);
     const rangeCacheRef = useRef(new Map());
+    const historyRequestsRef = useRef(new Map());
+    const historyGenerationRef = useRef(0);
     const txnsRef = useRef([]);
     const activeRangeRef = useRef(range);
     const activeCurrencyRef = useRef(currency);
@@ -151,11 +153,14 @@ export default function HomeScreen() {
             setChartData([]);
             setDelta({ val: 0, pct: 0 });
             setCoinDeltas({});
+            setGraphLoading(false);
             return;
         }
 
         const cacheKey = `${selectedRange}_${selectedCurrency}`;
+        const requestGeneration = historyGenerationRef.current;
         const cached = rangeCacheRef.current.get(cacheKey);
+        let request;
 
         if (cached && !isBackground) {
             setChartData(cached.chartData);
@@ -163,20 +168,32 @@ export default function HomeScreen() {
             setChartColor(cached.chartColor);
             setCoinDeltas(cached.coinDeltas);
             setGraphError('');
+            setGraphLoading(false);
             return;
         } else if (!isBackground) {
+            // Never leave the previous range visible while the requested range loads.
+            setChartData([]);
             setGraphLoading(true);
         }
 
         try {
             setGraphError('');
-            const { chartData, delta, chartColor, coinDeltas } = await computePortfolioHistory({
-                allTxns,
-                currentPortfolio,
-                currency: selectedCurrency,
-                range: selectedRange,
-                fetchCandles
-            });
+            request = historyRequestsRef.current.get(cacheKey);
+            if (!request) {
+                request = computePortfolioHistory({
+                    allTxns,
+                    currentPortfolio,
+                    currency: selectedCurrency,
+                    range: selectedRange,
+                    fetchCandles
+                });
+                historyRequestsRef.current.set(cacheKey, request);
+            }
+
+            const { chartData, delta, chartColor, coinDeltas } = await request;
+
+            // A refresh/import supersedes any history request that was already running.
+            if (requestGeneration !== historyGenerationRef.current) return;
 
             rangeCacheRef.current.set(cacheKey, { chartData, delta, chartColor, coinDeltas });
 
@@ -195,66 +212,27 @@ export default function HomeScreen() {
             }
         } catch (e) {
             if (globalThis.__DEV__) console.error('[computeHistory] Error', e);
-            if (!cached && activeRangeRef.current === selectedRange && activeCurrencyRef.current === selectedCurrency) {
+            if (
+                requestGeneration === historyGenerationRef.current &&
+                !cached &&
+                activeRangeRef.current === selectedRange &&
+                activeCurrencyRef.current === selectedCurrency
+            ) {
                 setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
             }
         } finally {
-            if (!isBackground && activeRangeRef.current === selectedRange && activeCurrencyRef.current === selectedCurrency) {
+            if (historyRequestsRef.current.get(cacheKey) === request) {
+                historyRequestsRef.current.delete(cacheKey);
+            }
+            if (
+                requestGeneration === historyGenerationRef.current &&
+                activeRangeRef.current === selectedRange &&
+                activeCurrencyRef.current === selectedCurrency
+            ) {
                 setGraphLoading(false);
             }
         }
     }, [tr]);
-
-    const prewarmRanges = useCallback((allTxns, currentPortfolio, selectedCurrency) => {
-        (async () => {
-            // 1. Immediately prewarm 1H and 1W in parallel
-            const immediateRanges = ['1H', '1W'];
-            await Promise.all(
-                immediateRanges.map(async (r) => {
-                    try {
-                        const cacheKey = `${r}_${selectedCurrency}`;
-                        if (!rangeCacheRef.current.has(cacheKey)) {
-                            const res = await computePortfolioHistory({
-                                allTxns,
-                                currentPortfolio,
-                                currency: selectedCurrency,
-                                range: r,
-                                fetchCandles
-                            });
-                            rangeCacheRef.current.set(cacheKey, res);
-                        }
-                    } catch (_e) {}
-                })
-            );
-
-            // 2. Prewarm remaining ranges sequentially (1M, ALL, 1Y)
-            const remainingRanges = ['1M', 'ALL', '1Y'];
-            for (const r of remainingRanges) {
-                try {
-                    const cacheKey = `${r}_${selectedCurrency}`;
-                    if (!rangeCacheRef.current.has(cacheKey)) {
-                        const res = await computePortfolioHistory({
-                            allTxns,
-                            currentPortfolio,
-                            currency: selectedCurrency,
-                            range: r,
-                            fetchCandles
-                        });
-                        rangeCacheRef.current.set(cacheKey, res);
-                    }
-                } catch (_e) {}
-            }
-
-            // 3. Persist complete multi-range cache
-            try {
-                const rangesObj = Object.fromEntries(rangeCacheRef.current.entries());
-                const d1Data = rangeCacheRef.current.get(`1D_${selectedCurrency}`);
-                if (d1Data) {
-                    saveCache(currentPortfolio, d1Data.chartData, d1Data.delta, '1D', selectedCurrency, rangesObj);
-                }
-            } catch (_e) {}
-        })();
-    }, []);
 
     const handleRangeSelect = useCallback((r) => {
         activeRangeRef.current = r;
@@ -267,7 +245,10 @@ export default function HomeScreen() {
             setChartColor(cached.chartColor);
             setCoinDeltas(cached.coinDeltas);
             setGraphError('');
+            setGraphLoading(false);
         } else if (portfolio && portfolio.length > 0) {
+            setChartData([]);
+            setGraphLoading(true);
             const txs = txnsRef.current && txnsRef.current.length > 0 ? txnsRef.current : null;
             if (txs) {
                 computeHistory(txs, portfolio, currency, r);
@@ -316,25 +297,13 @@ export default function HomeScreen() {
                     .map(symbol => cachedMap.get(symbol))
                     .filter(item => item && Math.abs(Number(item.quantity) - holdings[item.symbol]) <= 0.00000001);
                 const canShowCache = cachedPortfolio.length === symbols.length;
-                const cachedSymbols = new Set((cached?.portfolio || []).map(item => item.symbol));
-                const holdingsMatchCache = canShowCache && cachedSymbols.size === symbols.length && symbols.every(symbol => cachedSymbols.has(symbol));
-                // History is tied to the holdings snapshot; discard it when holdings changed.
-                if (holdingsMatchCache && cached?.rangesMap) {
-                    Object.entries(cached.rangesMap).forEach(([k, v]) => rangeCacheRef.current.set(k, v));
-                }
                 if (canShowCache) {
                     cachedPortfolio.sort((a, b) => b.value - a.value);
                     setPortfolio(cachedPortfolio);
-                    const cachedHistory = holdingsMatchCache && cached?.rangesMap?.[`1D_${selectedCurrency}`];
-                    if (cachedHistory) {
-                        setChartData(cachedHistory.chartData || []);
-                        setDelta(cachedHistory.delta || { val: 0, pct: 0 });
-                        setChartColor(cachedHistory.chartColor || '#22c55e');
-                        setCoinDeltas(cachedHistory.coinDeltas || {});
-                    } else if (holdingsMatchCache && cached?.chartData && cached?.range === '1D') {
-                        setChartData(cached.chartData);
-                        setDelta(cached.delta || { val: 0, pct: 0 });
-                    }
+                    // Cached balances may render immediately, but wait for a complete
+                    // fresh day history before mounting the graph.
+                    setChartData([]);
+                    setGraphLoading(true);
                     setBooting(false);
                 }
 
@@ -344,19 +313,19 @@ export default function HomeScreen() {
                         .then(async (freshPortfolio) => {
                             if (!freshPortfolio) return;
                             setPortfolio(freshPortfolio);
-                            const refreshedRange = activeRangeRef.current;
-                            await computeHistory(allTxns, freshPortfolio, selectedCurrency, refreshedRange, true);
-                            if (refreshedRange !== '1D') {
-                                await computeHistory(allTxns, freshPortfolio, selectedCurrency, '1D', true);
-                            }
-                            prewarmRanges(allTxns, freshPortfolio, selectedCurrency);
+                            // Only the day view is eager. Every other range is fetched
+                            // by handleRangeSelect when the user asks for it.
+                            await computeHistory(allTxns, freshPortfolio, selectedCurrency, '1D', true);
                         })
-                        .catch((e) => debugLog('[Startup refresh] Error', e));
+                        .catch((e) => {
+                            setGraphLoading(false);
+                            setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
+                            debugLog('[Startup refresh] Error', e);
+                        });
                 } else {
                     const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
                     setPortfolio(p);
-                    await computeHistory(allTxns, p, selectedCurrency, activeRangeRef.current);
-                    prewarmRanges(allTxns, p, selectedCurrency);
+                    await computeHistory(allTxns, p, selectedCurrency, '1D');
                 }
             } catch (e) {
                 const allTxns = await getAllTransactions().catch(() => []);
@@ -366,7 +335,9 @@ export default function HomeScreen() {
                     setPortfolio(loaded.portfolio);
                     setChartData(loaded.chartData);
                     setDelta(loaded.delta);
-                    setRange(loaded.range);
+                    setRange('1D');
+                    activeRangeRef.current = '1D';
+                    setGraphLoading(false);
                     Alert.alert(tr('home.offlineModeTitle', 'Offline Mode'), tr('home.offlineModeMessage', 'Using cached data (API Limit / Network).'));
                 } else {
                     setPortfolio([]);
@@ -382,7 +353,7 @@ export default function HomeScreen() {
                 setBooting(false);
             }
         })();
-    }, [computeHistory, getEffectiveHoldings, prewarmRanges, smartFetchPortfolio, tr]);
+    }, [computeHistory, getEffectiveHoldings, smartFetchPortfolio, tr]);
 
     const pickAndImportCsv = async () => {
         let result;
@@ -423,7 +394,10 @@ export default function HomeScreen() {
             const allTxns = await getAllTransactions();
             txnsRef.current = allTxns || [];
             setPortfolio(p);
-            computeHistory(allTxns, p, currency, range);
+            historyGenerationRef.current += 1;
+            rangeCacheRef.current.clear();
+            historyRequestsRef.current.clear();
+            await computeHistory(allTxns, p, currency, range);
 
             Alert.alert(
                 tr('home.importCompleteTitle', 'Import complete'),
@@ -438,7 +412,9 @@ export default function HomeScreen() {
 
     const refreshPrices = async () => {
         setLoading(true);
+        historyGenerationRef.current += 1;
         rangeCacheRef.current.clear();
+        historyRequestsRef.current.clear();
         clearCandleCache();
         try {
             const allTxns = await getAllTransactions();
@@ -456,7 +432,6 @@ export default function HomeScreen() {
             const p = await fetchPortfolioPrices(holdings, currency);
             setPortfolio(p);
             await computeHistory(allTxns, p, currency, range);
-            prewarmRanges(allTxns, p, currency);
         } catch (e) {
             const allTxns = await getAllTransactions().catch(() => []);
             const cached = allTxns.length > 0 ? await loadCache(currency) : null;
@@ -638,16 +613,26 @@ export default function HomeScreen() {
 
                 {/* GRAPH SECTION */}
                 <View style={{ marginBottom: 16 }}>
-                    <CryptoGraph
-                        data={chartData}
-                        currentValue={totalValue}
-                        currency={currency}
-                        type="line"
-                        onRangeChange={() => { }}
-                        showGrid={false}
-                        height={220}
-                        color={chartColor}
-                    />
+                    <View style={styles.graphFrame}>
+                        {graphLoading ? (
+                            <ActivityIndicator
+                                testID="graph-loading-indicator"
+                                size="small"
+                                color={colors?.text || '#fff'}
+                            />
+                        ) : !graphError ? (
+                            <CryptoGraph
+                                data={chartData}
+                                currentValue={totalValue}
+                                currency={currency}
+                                type="line"
+                                onRangeChange={() => { }}
+                                showGrid={false}
+                                height={220}
+                                color={chartColor}
+                            />
+                        ) : null}
+                    </View>
 
                     {!!graphError && (
                         <View style={{ alignItems: 'center', marginTop: 12 }}>
@@ -681,9 +666,6 @@ export default function HomeScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
-                    {graphLoading && (
-                        <ActivityIndicator size="small" color={colors?.text || '#fff'} style={{ marginTop: 8 }} />
-                    )}
                 </View>
 
 
@@ -884,6 +866,12 @@ const styles = StyleSheet.create({
     },
     pnlValText: { fontSize: 14, fontWeight: '700', marginRight: 4 },
     pnlPctText: { fontSize: 13, fontWeight: '600' },
+
+    graphFrame: {
+        height: 220,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 
     rangeSelectorRow: {
         flexDirection: 'row',

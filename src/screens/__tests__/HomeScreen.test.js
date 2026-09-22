@@ -338,9 +338,16 @@ describe('HomeScreen cached-first startup', () => {
 
     beforeEach(() => {
         const db = require('../../db');
+        const history = require('../../utils/portfolioHistory');
         db.getAllTransactions.mockResolvedValue(txns);
         db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
         db.loadCache.mockResolvedValue(cached);
+        history.computePortfolioHistory.mockReset().mockResolvedValue({
+            chartData: [],
+            delta: { val: 0, pct: 0 },
+            chartColor: '#22c55e',
+            coinDeltas: {},
+        });
     });
 
     it('shows stale cached prices while refresh is pending, then shows fresh values', async () => {
@@ -361,20 +368,49 @@ describe('HomeScreen cached-first startup', () => {
         expect(getAllByText(/€100\.00/).length).toBeGreaterThan(0);
     });
 
-    it('keeps the selected week visible when the background day chart finishes', async () => {
+    it('keeps an on-demand week visible when the background day chart finishes', async () => {
         const history = require('../../utils/portfolioHistory');
         const day = { chartData: [], delta: { val: 11, pct: 11 }, chartColor: '#22c55e', coinDeltas: {} };
         const week = { ...day, delta: { val: 22, pct: 22 } };
-        require('../../db').loadCache.mockResolvedValue({ ...cached, rangesMap: { '1D_EUR': day, '1W_EUR': week } });
         require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
         let finishDay;
-        history.computePortfolioHistory.mockImplementationOnce(() => new Promise(resolve => { finishDay = resolve; }));
+        history.computePortfolioHistory.mockImplementation(({ range }) => (
+            range === '1D'
+                ? new Promise(resolve => { finishDay = resolve; })
+                : Promise.resolve(week)
+        ));
         const { getByText, getAllByText, queryByText } = render(<HomeScreen />);
         await waitFor(() => expect(finishDay).toBeDefined());
         fireEvent.press(getByText('1W'));
+        await waitFor(() => expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0));
         await act(async () => { finishDay({ ...day, delta: { val: 33, pct: 33 } }); });
         expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0);
         expect(queryByText(/33\.00%/)).toBeNull();
+    });
+
+    it('does not mount the graph until the day history is complete', async () => {
+        const history = require('../../utils/portfolioHistory');
+        require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
+        let finishDay;
+        history.computePortfolioHistory.mockImplementation(() => new Promise(resolve => { finishDay = resolve; }));
+
+        const { getByTestId, queryByTestId } = render(<HomeScreen />);
+
+        await waitFor(() => expect(getByTestId('graph-loading-indicator')).toBeTruthy());
+        await waitFor(() => expect(finishDay).toBeDefined());
+        expect(queryByTestId('mock-crypto-graph')).toBeNull();
+
+        await act(async () => {
+            finishDay({
+                chartData: [{ timestamp: 1, value: 100 }, { timestamp: 2, value: 200 }],
+                delta: { val: 100, pct: 100 },
+                chartColor: '#22c55e',
+                coinDeltas: {},
+            });
+        });
+
+        await waitFor(() => expect(getByTestId('mock-crypto-graph')).toBeTruthy());
+        expect(queryByTestId('graph-loading-indicator')).toBeNull();
     });
 
     it('renders immediately when a cached dust coin has zero price', async () => {
@@ -399,6 +435,7 @@ describe('HomeScreen graph ranges', () => {
 
         db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
         db.getAllTransactions.mockResolvedValue([{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }]);
+        db.loadCache.mockResolvedValue(null);
         cryptoCompare.fetchPortfolioPrices.mockResolvedValue([
             { symbol: 'BTC', quantity: 1, price: 50000, value: 50000, change24h: 2.5 },
         ]);
@@ -408,6 +445,24 @@ describe('HomeScreen graph ranges', () => {
             chartColor: '#22c55e',
             coinDeltas: {},
         });
+    });
+
+    it('loads only the day range at startup and defers other ranges until selected', async () => {
+        const history = require('../../utils/portfolioHistory');
+        const { getByText } = render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1D' }));
+        });
+
+        expect(history.computePortfolioHistory.mock.calls.map(([args]) => args.range)).toEqual(['1D']);
+
+        fireEvent.press(getByText('1W'));
+
+        await waitFor(() => {
+            expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({ range: '1W' }));
+        });
+        expect(history.computePortfolioHistory.mock.calls.map(([args]) => args.range)).toEqual(['1D', '1W']);
     });
 
     it('recomputes graph when switching to ALL range', async () => {
