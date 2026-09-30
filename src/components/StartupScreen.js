@@ -3,7 +3,7 @@ import { Image, StatusBar, StyleSheet, View } from 'react-native';
 
 export default function StartupScreen() {
     return (
-        <View style={styles.screen}>
+        <View style={styles.screen} testID="startup-screen">
             <StatusBar barStyle="light-content" backgroundColor="#070F1C" />
             <Image
                 source={require('../../assets/images/branding-source.png')}

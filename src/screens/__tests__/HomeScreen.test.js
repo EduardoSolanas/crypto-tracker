@@ -33,6 +33,8 @@ jest.mock('../../db', () => ({
 
 jest.mock('../../cryptoCompare', () => ({
     fetchPortfolioPrices: jest.fn().mockResolvedValue([]),
+    fetchCandles: jest.fn().mockResolvedValue([]),
+    clearCandleCache: jest.fn(),
 }));
 
 jest.mock('../../csv', () => ({
@@ -332,73 +334,64 @@ describe('HomeScreen - Small Balances Toggle', () => {
     });
 });
 
-describe('HomeScreen cached-first startup', () => {
+describe('HomeScreen startup and first load', () => {
     const txns = [{ symbol: 'BTC', amount: 1, way: 'BUY', date_iso: '2024-01-01' }];
     const cached = { timestamp: Date.now() - 2 * 60 * 60 * 1000, range: '1D', chartData: [], delta: { val: 0, pct: 0 }, portfolio: [{ symbol: 'BTC', quantity: 1, price: 100, value: 100, change24h: 0 }] };
 
     beforeEach(() => {
         const db = require('../../db');
         const history = require('../../utils/portfolioHistory');
+        const cryptoCompare = require('../../cryptoCompare');
         db.getAllTransactions.mockResolvedValue(txns);
         db.getHoldingsMap.mockResolvedValue({ BTC: 1 });
         db.loadCache.mockResolvedValue(cached);
+        cryptoCompare.fetchCandles.mockResolvedValue([]);
         history.computePortfolioHistory.mockReset().mockResolvedValue({
-            chartData: [],
-            delta: { val: 0, pct: 0 },
+            chartData: [{ timestamp: 1, value: 100 }, { timestamp: 2, value: 200 }],
+            delta: { val: 100, pct: 100 },
             chartColor: '#22c55e',
             coinDeltas: {},
         });
     });
 
-    it('shows stale cached prices while refresh is pending, then shows fresh values', async () => {
+    it('does not show graphs screen while API calls are pending, then shows fresh values once complete', async () => {
         let resolve;
         const pending = new Promise(r => { resolve = r; });
         require('../../cryptoCompare').fetchPortfolioPrices.mockReturnValue(pending);
-        const { getByText, getAllByText } = render(<HomeScreen />);
-        await waitFor(() => expect(getByText('BTC')).toBeTruthy());
-        expect(getAllByText(/€100\.00/).length).toBeGreaterThan(0);
-        resolve([{ symbol: 'BTC', quantity: 1, price: 200, value: 200, change24h: 0 }]);
+        const { queryByText, getAllByText } = render(<HomeScreen />);
+
+        // While API call is pending, the graphs screen is NOT shown
+        expect(queryByText('BTC')).toBeNull();
+        expect(queryByText(/Total Worth/i)).toBeNull();
+
+        await act(async () => {
+            resolve([{ symbol: 'BTC', quantity: 1, price: 200, value: 200, change24h: 0 }]);
+        });
+
         await waitFor(() => expect(getAllByText(/€200\.00/).length).toBeGreaterThan(0));
     });
 
-    it('keeps cached balance when refresh rejects', async () => {
+    it('keeps cached balance when refresh rejects (offline mode)', async () => {
         require('../../cryptoCompare').fetchPortfolioPrices.mockRejectedValue(new Error('offline'));
         const { getByText, getAllByText } = render(<HomeScreen />);
         await waitFor(() => expect(getByText('BTC')).toBeTruthy());
         expect(getAllByText(/€100\.00/).length).toBeGreaterThan(0);
     });
 
-    it('keeps an on-demand week visible when the background day chart finishes', async () => {
-        const history = require('../../utils/portfolioHistory');
-        const day = { chartData: [], delta: { val: 11, pct: 11 }, chartColor: '#22c55e', coinDeltas: {} };
-        const week = { ...day, delta: { val: 22, pct: 22 } };
-        require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
-        let finishDay;
-        history.computePortfolioHistory.mockImplementation(({ range }) => (
-            range === '1D'
-                ? new Promise(resolve => { finishDay = resolve; })
-                : Promise.resolve(week)
-        ));
-        const { getByText, getAllByText, queryByText } = render(<HomeScreen />);
-        await waitFor(() => expect(finishDay).toBeDefined());
-        fireEvent.press(getByText('1W'));
-        await waitFor(() => expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0));
-        await act(async () => { finishDay({ ...day, delta: { val: 33, pct: 33 } }); });
-        expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0);
-        expect(queryByText(/33\.00%/)).toBeNull();
-    });
-
-    it('does not mount the graph until the day history is complete', async () => {
+    it('does not show graphs screen until day history graph building is complete', async () => {
         const history = require('../../utils/portfolioHistory');
         require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
         let finishDay;
         history.computePortfolioHistory.mockImplementation(() => new Promise(resolve => { finishDay = resolve; }));
 
-        const { getByTestId, queryByTestId } = render(<HomeScreen />);
+        const { queryByTestId, getByTestId, queryByText } = render(<HomeScreen />);
 
-        await waitFor(() => expect(getByTestId('graph-loading-indicator')).toBeTruthy());
-        await waitFor(() => expect(finishDay).toBeDefined());
+        // While graph building hasn't finished, the graphs screen and graph are not shown
         expect(queryByTestId('mock-crypto-graph')).toBeNull();
+        expect(queryByTestId('graph-loading-indicator')).toBeNull();
+        expect(queryByText(/Total Worth/i)).toBeNull();
+
+        await waitFor(() => expect(finishDay).toBeDefined());
 
         await act(async () => {
             finishDay({
@@ -413,16 +406,29 @@ describe('HomeScreen cached-first startup', () => {
         expect(queryByTestId('graph-loading-indicator')).toBeNull();
     });
 
-    it('renders immediately when a cached dust coin has zero price', async () => {
-        const db = require('../../db');
-        db.getHoldingsMap.mockResolvedValue({ BTC: 1, DUST: 1 });
-        db.getAllTransactions.mockResolvedValue(txns.concat({ symbol: 'DUST', amount: 1, way: 'BUY' }));
-        db.loadCache.mockResolvedValue({ ...cached, portfolio: cached.portfolio.concat({ symbol: 'DUST', quantity: 1, price: 0, value: 0 }) });
-        let resolve;
-        require('../../cryptoCompare').fetchPortfolioPrices.mockReturnValue(new Promise(r => { resolve = r; }));
-        const { getByText } = render(<HomeScreen />);
-        await waitFor(() => expect(getByText('BTC')).toBeTruthy());
-        resolve([]);
+    it('pre-fetches day candles in parallel with portfolio prices during first load', async () => {
+        const cryptoCompare = require('../../cryptoCompare');
+        cryptoCompare.fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
+
+        render(<HomeScreen />);
+
+        await waitFor(() => {
+            expect(cryptoCompare.fetchCandles).toHaveBeenCalledWith('BTC', 'EUR', 'hour', 44, 1);
+        });
+    });
+
+    it('switches ranges and recomputes after initial load completes', async () => {
+        const history = require('../../utils/portfolioHistory');
+        const day = { chartData: [], delta: { val: 11, pct: 11 }, chartColor: '#22c55e', coinDeltas: {} };
+        const week = { ...day, delta: { val: 22, pct: 22 } };
+        require('../../cryptoCompare').fetchPortfolioPrices.mockResolvedValue([{ ...cached.portfolio[0], price: 200, value: 200 }]);
+        history.computePortfolioHistory.mockImplementation(({ range }) => (
+            range === '1D' ? Promise.resolve(day) : Promise.resolve(week)
+        ));
+        const { getByText, getAllByText } = render(<HomeScreen />);
+        await waitFor(() => expect(getAllByText(/11\.00%/).length).toBeGreaterThan(0));
+        fireEvent.press(getByText('1W'));
+        await waitFor(() => expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0));
     });
 });
 

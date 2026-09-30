@@ -14,7 +14,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     ActivityIndicator,
     Alert,
-    Platform,
     RefreshControl,
     ScrollView,
     StatusBar,
@@ -268,12 +267,14 @@ export default function HomeScreen() {
             let selectedCurrency = 'EUR';
             try {
                 await initDb();
-                const savedCurrency = await getMeta('currency');
+                const [savedCurrency, allTxns] = await Promise.all([
+                    getMeta('currency'),
+                    getAllTransactions()
+                ]);
                 selectedCurrency = savedCurrency || 'EUR';
                 setCurrency(selectedCurrency);
                 activeCurrencyRef.current = selectedCurrency;
 
-                const allTxns = await getAllTransactions();
                 txnsRef.current = allTxns || [];
                 if (!allTxns || allTxns.length === 0) {
                     setPortfolio([]);
@@ -290,42 +291,26 @@ export default function HomeScreen() {
                 }
 
                 const cached = await loadCache(selectedCurrency);
-                // Cache-first startup: display a cache that still matches the current
-                // holdings immediately, then refresh prices and history in the background.
-                const cachedMap = new Map((cached?.portfolio || []).map(item => [item.symbol, item]));
-                const cachedPortfolio = symbols
-                    .map(symbol => cachedMap.get(symbol))
-                    .filter(item => item && Math.abs(Number(item.quantity) - holdings[item.symbol]) <= 0.00000001);
-                const canShowCache = cachedPortfolio.length === symbols.length;
-                if (canShowCache) {
-                    cachedPortfolio.sort((a, b) => b.value - a.value);
-                    setPortfolio(cachedPortfolio);
-                    // Cached balances may render immediately, but wait for a complete
-                    // fresh day history before mounting the graph.
-                    setChartData([]);
-                    setGraphLoading(true);
-                    setBooting(false);
+                if (cached?.rangesMap) {
+                    Object.entries(cached.rangesMap).forEach(([k, v]) => {
+                        if (v && v.chartData && v.chartData.length > 0) {
+                            rangeCacheRef.current.set(k, v);
+                        }
+                    });
                 }
 
-                // Refresh independently so cached values remain visible while APIs resolve.
-                if (canShowCache) {
-                    smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency)
-                        .then(async (freshPortfolio) => {
-                            if (!freshPortfolio) return;
-                            setPortfolio(freshPortfolio);
-                            // Only the day view is eager. Every other range is fetched
-                            // by handleRangeSelect when the user asks for it.
-                            await computeHistory(allTxns, freshPortfolio, selectedCurrency, '1D', true);
-                        })
-                        .catch((e) => {
-                            setGraphLoading(false);
-                            setGraphError(e?.message || tr('home.refreshErrorTitle', 'Refresh Error'));
-                            debugLog('[Startup refresh] Error', e);
-                        });
+                // Parallelize price fetching and 1D candles pre-fetching for fast first load.
+                // Do not show the graphs screen until both API calls and graph building complete.
+                const [freshPortfolio] = await Promise.all([
+                    smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency),
+                    Promise.all(symbols.map(sym => fetchCandles(sym, selectedCurrency, 'hour', 44, 1).catch(() => [])))
+                ]);
+
+                if (freshPortfolio && freshPortfolio.length > 0) {
+                    setPortfolio(freshPortfolio);
+                    await computeHistory(allTxns, freshPortfolio, selectedCurrency, '1D');
                 } else {
-                    const p = await smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency);
-                    setPortfolio(p);
-                    await computeHistory(allTxns, p, selectedCurrency, '1D');
+                    setPortfolio([]);
                 }
             } catch (e) {
                 const allTxns = await getAllTransactions().catch(() => []);
@@ -502,12 +487,7 @@ export default function HomeScreen() {
     const hiddenCount = (portfolio?.length || 0) - (portfolio ? portfolio.filter(p => (p.value || 0) >= 10).length : 0);
 
     if (booting) {
-        if (Platform.OS === 'android') return <StartupScreen />;
-        return (
-            <SafeAreaView style={[{ flex: 1, backgroundColor: colors?.background || '#000' }, styles.centerContent]}>
-                <ActivityIndicator color={colors?.text || '#fff'} size="large" />
-            </SafeAreaView>
-        );
+        return <StartupScreen />;
     }
 
     if (!portfolio || portfolio.length === 0) {
