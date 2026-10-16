@@ -430,6 +430,54 @@ describe('HomeScreen startup and first load', () => {
         fireEvent.press(getByText('1W'));
         await waitFor(() => expect(getAllByText(/22\.00%/).length).toBeGreaterThan(0));
     });
+
+    it('never uses recent cached prices or cached 1D range on startup, holding splash screen until live APIs finish', async () => {
+        const db = require('../../db');
+        const cryptoCompare = require('../../cryptoCompare');
+        const history = require('../../utils/portfolioHistory');
+
+        db.loadCache.mockResolvedValue({
+            timestamp: Date.now(), // Fresh cache (< 10 mins)
+            range: '1D',
+            chartData: [{ timestamp: 1, value: 123 }],
+            delta: { val: -50, pct: -50 },
+            portfolio: [{ symbol: 'BTC', quantity: 1, price: 123, value: 123, change24h: -50 }],
+            rangesMap: {
+                '1D_EUR': {
+                    chartData: [{ timestamp: 1, value: 123 }],
+                    delta: { val: -50, pct: -50 },
+                    chartColor: '#ef4444',
+                    coinDeltas: { BTC: { val: -50, pct: -50 } },
+                },
+            },
+        });
+
+        let resolvePrices;
+        cryptoCompare.fetchPortfolioPrices.mockReturnValue(new Promise((r) => { resolvePrices = r; }));
+
+        const { queryByTestId, queryByText, getAllByText } = render(<HomeScreen />);
+
+        await waitFor(() => expect(resolvePrices).toBeDefined());
+        expect(queryByTestId('startup-screen')).toBeTruthy();
+        expect(queryByText(/€123\.00/)).toBeNull();
+        expect(queryByText(/-50\.00%/)).toBeNull();
+
+        await act(async () => {
+            resolvePrices([{ symbol: 'BTC', quantity: 1, price: 250, value: 250, change24h: 25 }]);
+        });
+
+        await waitFor(() => {
+            expect(queryByTestId('startup-screen')).toBeNull();
+            expect(getAllByText(/€250\.00/).length).toBeGreaterThan(0);
+            expect(getAllByText(/100\.00%/).length).toBeGreaterThan(0);
+        });
+        expect(history.computePortfolioHistory).toHaveBeenCalledWith(expect.objectContaining({
+            range: '1D',
+            currency: 'EUR',
+        }));
+        expect(queryByText(/€123\.00/)).toBeNull();
+        expect(queryByText(/-50\.00%/)).toBeNull();
+    });
 });
 
 describe('HomeScreen graph ranges', () => {

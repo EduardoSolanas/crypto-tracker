@@ -34,15 +34,6 @@ import { formatMoney, formatQuantity } from '../utils/format';
 import { computePortfolioHistory } from '../utils/portfolioHistory';
 import { useTheme } from '../utils/theme';
 
-const CACHE_MAJOR = 10 * 60 * 1000;  // 10 minutes for assets > $10
-const CACHE_MINOR = 60 * 60 * 1000;  // 1 hour for assets <= $10
-
-const debugLog = (...args) => {
-    if (globalThis.__DEV__) {
-        console.log(...args);
-    }
-};
-
 export default function HomeScreen() {
     const { colors, isDark } = useTheme();
     const { t } = useTranslation();
@@ -95,56 +86,6 @@ export default function HomeScreen() {
             );
         }
         return {};
-    }, []);
-
-    const smartFetchPortfolio = useCallback(async (holdingsMap, cachedPortfolio, savedTimestamp, selectedCurrency) => {
-        const symbols = Object.keys(holdingsMap || {}).filter(s => (holdingsMap[s] || 0) > 0.00000001);
-        if (symbols.length === 0) {
-            return [];
-        }
-
-        const now = Date.now();
-        const toFetch = [];
-        const kept = [];
-
-        if (!cachedPortfolio || !savedTimestamp) {
-            toFetch.push(...symbols);
-        } else {
-            const cacheMap = new Map(cachedPortfolio.map(i => [i.symbol, i]));
-
-            for (const sym of symbols) {
-                const cachedItem = cacheMap.get(sym);
-                if (!cachedItem || !cachedItem.price || cachedItem.price <= 0) {
-                    toFetch.push(sym);
-                } else {
-                    const val = cachedItem.value;
-                    const age = now - savedTimestamp;
-                    const threshold = val > 10 ? CACHE_MAJOR : CACHE_MINOR;
-
-                    if (age > threshold) {
-                        toFetch.push(sym);
-                    } else {
-                        if (Math.abs(cachedItem.quantity - holdingsMap[sym]) > 0.00000001) {
-                            toFetch.push(sym);
-                        } else {
-                            kept.push(cachedItem);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (toFetch.length === 0) return kept;
-
-        debugLog(`[SmartFetch] Fetching ${toFetch.length} items (Cached: ${kept.length})`);
-
-        const subsetMap = {};
-        toFetch.forEach(s => subsetMap[s] = holdingsMap[s]);
-
-        const newItems = await fetchPortfolioPrices(subsetMap, selectedCurrency);
-        const merged = [...kept, ...newItems];
-        merged.sort((a, b) => b.value - a.value);
-        return merged;
     }, []);
 
     const computeHistory = useCallback(async (allTxns, currentPortfolio, selectedCurrency, selectedRange, isBackground = false) => {
@@ -290,19 +231,17 @@ export default function HomeScreen() {
                     return;
                 }
 
-                const cached = await loadCache(selectedCurrency);
-                if (cached?.rangesMap) {
-                    Object.entries(cached.rangesMap).forEach(([k, v]) => {
-                        if (v && v.chartData && v.chartData.length > 0) {
-                            rangeCacheRef.current.set(k, v);
-                        }
-                    });
-                }
+                rangeCacheRef.current.clear();
+                historyRequestsRef.current.clear();
+                clearCandleCache();
 
-                // Parallelize price fetching and 1D candles pre-fetching for fast first load.
-                // Do not show the graphs screen until both API calls and graph building complete.
+                const activeHoldings = {};
+                symbols.forEach(s => { activeHoldings[s] = holdings[s]; });
+
+                // Parallelize live price fetching and 1D candles pre-fetching for fast first load.
+                // Hold the splash screen until all API calls and graph building finish.
                 const [freshPortfolio] = await Promise.all([
-                    smartFetchPortfolio(holdings, cached?.portfolio, cached?.timestamp, selectedCurrency),
+                    fetchPortfolioPrices(activeHoldings, selectedCurrency),
                     Promise.all(symbols.map(sym => fetchCandles(sym, selectedCurrency, 'hour', 44, 1).catch(() => [])))
                 ]);
 
@@ -317,6 +256,13 @@ export default function HomeScreen() {
                 const loaded = allTxns.length > 0 ? await loadCache(selectedCurrency) : null;
 
                 if (loaded && loaded.portfolio && loaded.portfolio.length > 0) {
+                    if (loaded.rangesMap) {
+                        Object.entries(loaded.rangesMap).forEach(([k, v]) => {
+                            if (v && v.chartData && v.chartData.length > 0) {
+                                rangeCacheRef.current.set(k, v);
+                            }
+                        });
+                    }
                     setPortfolio(loaded.portfolio);
                     setChartData(loaded.chartData);
                     setDelta(loaded.delta);
@@ -338,7 +284,7 @@ export default function HomeScreen() {
                 setBooting(false);
             }
         })();
-    }, [computeHistory, getEffectiveHoldings, smartFetchPortfolio, tr]);
+    }, [computeHistory, getEffectiveHoldings, tr]);
 
     const pickAndImportCsv = async () => {
         let result;
