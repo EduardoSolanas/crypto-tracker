@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, render } from '@testing-library/react-native';
-import StartupScreen, { STARTUP_POLYGONS } from '../StartupScreen';
+import StartupScreen from '../StartupScreen';
+import { STARTUP_POLYGONS } from '../startupPolygons';
 
 describe('StartupScreen fan animation', () => {
     beforeEach(() => {
