@@ -1,7 +1,7 @@
 console.log('--- LOADING JEST CONFIG ---');
 module.exports = {
     testTimeout: 30000,
-    maxWorkers: 2,
+    maxWorkers: 1,
     preset: 'jest-expo',
     transform: {
         '^.+\\.(js|jsx|ts|tsx)$': 'babel-jest',

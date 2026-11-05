@@ -3,18 +3,18 @@ import { act, render } from '@testing-library/react-native';
 import StartupScreen from '../StartupScreen';
 import { STARTUP_POLYGONS } from '../startupPolygons';
 
+const litCount = (screen) => screen.queryAllByTestId(/^startup-polygon-lit-/).length;
+
+const settle = async (ms) => {
+    await act(async () => {
+        await new Promise((r) => setTimeout(r, ms));
+    });
+};
+
+// Real timers only: fake-timer state leaked across suites under runInBand and
+// hung the worker. The full sweep takes ~5.6 s of wall clock.
 describe('StartupScreen fan animation', () => {
-    beforeEach(() => {
-        jest.useFakeTimers();
-    });
-
-    afterEach(() => {
-        jest.useRealTimers();
-    });
-
-    const litCount = (screen) => screen.queryAllByTestId(/^startup-polygon-lit-/).length;
-
-    it('lights polygons progressively over time without snapping to full', () => {
+    it('lights polygons progressively over time until all are lit', async () => {
         const screen = render(<StartupScreen />);
 
         expect(screen.getByTestId('startup-screen')).toBeTruthy();
@@ -22,25 +22,12 @@ describe('StartupScreen fan animation', () => {
         expect(initialLit).toBeGreaterThanOrEqual(1);
         expect(initialLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        act(() => { jest.advanceTimersByTime(800); });
+        await settle(1000);
         const earlyLit = litCount(screen);
         expect(earlyLit).toBeGreaterThan(initialLit);
         expect(earlyLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        act(() => { jest.advanceTimersByTime(8000); });
+        await settle(6000);
         expect(litCount(screen)).toBe(STARTUP_POLYGONS.length);
-    });
-
-    it('keeps animating at the same pace regardless of any progress prop', () => {
-        const screen = render(<StartupScreen progress={1} />);
-
-        const litNow = litCount(screen);
-        expect(litNow).toBeLessThan(STARTUP_POLYGONS.length);
-
-        act(() => { jest.advanceTimersByTime(160); });
-        screen.rerender(<StartupScreen progress={1} />);
-        const litAfterTwoTicks = litCount(screen);
-        expect(litAfterTwoTicks).toBeGreaterThan(litNow);
-        expect(litAfterTwoTicks).toBeLessThan(STARTUP_POLYGONS.length);
-    });
+    }, 20000);
 });

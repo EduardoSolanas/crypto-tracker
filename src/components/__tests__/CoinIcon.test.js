@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 import CoinIcon from '../CoinIcon';
 
 jest.mock('../../utils/iconCache', () => ({
@@ -12,21 +12,23 @@ jest.mock('../../utils/iconCache', () => ({
 
 describe('CoinIcon', () => {
     it('uses fallback uri before showing text fallback', async () => {
-        const { getByTestId, queryByTestId } = render(
+        const screen = render(
             <CoinIcon symbol="BTC" imageUrl={null} size={40} />
         );
 
-        const image = await waitFor(() => getByTestId('coin-icon-image'));
-        fireEvent(image, 'error');
+        // Flush the icon-load promise deterministically (microtasks, no timers).
+        await act(async () => {});
 
-        await waitFor(() => {
-            expect(queryByTestId('coin-icon-fallback')).toBeNull();
-        });
+        fireEvent(screen.getByTestId('coin-icon-image'), 'error');
+        await act(async () => {});
 
-        fireEvent(getByTestId('coin-icon-image'), 'error');
+        // First error advanced to the second fallback URI: image still shown.
+        expect(screen.queryByTestId('coin-icon-fallback')).toBeNull();
 
-        await waitFor(() => {
-            expect(getByTestId('coin-icon-fallback')).toBeTruthy();
-        });
+        fireEvent(screen.getByTestId('coin-icon-image'), 'error');
+        await act(async () => {});
+
+        // Second error exhausted the fallback list: letter fallback shown.
+        expect(screen.getByTestId('coin-icon-fallback')).toBeTruthy();
     });
 });
