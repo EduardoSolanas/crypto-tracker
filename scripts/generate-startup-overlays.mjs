@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
  * Renders each startup polygon as a full-canvas transparent PNG overlay
- * (1236x2745 = 3x the 412x915 design space) so the app can light polygons
- * with plain <Image> opacity instead of runtime react-native-svg, which
- * silently failed to paint on device.
+ * (412x915 matching splash-polygons-bg.png 1:1) so the app can light polygons
+ * with native-driver Animated.Image opacity and instant bitmap decoding.
  *
  * Run: node scripts/generate-startup-overlays.mjs
  */
@@ -17,20 +16,22 @@ const { V, default: POLYGONS } = require('../src/components/startupPolygons.js')
 
 const WIDTH = 412;
 const HEIGHT = 915;
-const SCALE = 3;
+const SCALE = 1;
 const OUT_DIR = path.join('assets', 'images', 'startup-overlays');
 
 const GRADS = `
   <defs>
-    <linearGradient id="leftGrad" x1="0" y1="30%" x2="100%" y2="70%">
-      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.48"/>
-      <stop offset="60%" stop-color="#0284C7" stop-opacity="0.30"/>
-      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.20"/>
+    <linearGradient id="leftGrad" x1="0%" y1="25%" x2="100%" y2="75%">
+      <stop offset="0%" stop-color="#E0F2FE" stop-opacity="0.78"/>
+      <stop offset="38%" stop-color="#38BDF8" stop-opacity="0.62"/>
+      <stop offset="75%" stop-color="#0284C7" stop-opacity="0.46"/>
+      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.34"/>
     </linearGradient>
-    <linearGradient id="rightGrad" x1="100%" y1="30%" x2="0%" y2="70%">
-      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.48"/>
-      <stop offset="60%" stop-color="#0284C7" stop-opacity="0.30"/>
-      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.20"/>
+    <linearGradient id="rightGrad" x1="100%" y1="25%" x2="0%" y2="75%">
+      <stop offset="0%" stop-color="#E0F2FE" stop-opacity="0.78"/>
+      <stop offset="38%" stop-color="#38BDF8" stop-opacity="0.62"/>
+      <stop offset="75%" stop-color="#0284C7" stop-opacity="0.46"/>
+      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.34"/>
     </linearGradient>
   </defs>`;
 
@@ -44,7 +45,8 @@ for (const poly of POLYGONS) {
   const svg =
     `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" ` +
     `xmlns="http://www.w3.org/2000/svg">${GRADS}` +
-    `<polygon points="${points}" fill="${grad}" stroke="#38BDF8" stroke-width="1.2"/>` +
+    `<polygon points="${points}" fill="${grad}" stroke="#38BDF8" stroke-opacity="0.55" stroke-width="3.2" stroke-linejoin="round"/>` +
+    `<polygon points="${points}" fill="none" stroke="#E0F2FE" stroke-opacity="0.92" stroke-width="1.3" stroke-linejoin="round"/>` +
     `</svg>`;
   const png = new Resvg(svg, { fitTo: { mode: 'width', value: WIDTH * SCALE } })
     .render()

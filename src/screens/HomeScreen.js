@@ -205,6 +205,9 @@ export default function HomeScreen() {
         if (didBootstrapRef.current) return;
         didBootstrapRef.current = true;
         (async () => {
+            const minSplashTimer = process.env.NODE_ENV === 'test'
+                ? Promise.resolve()
+                : new Promise((resolve) => setTimeout(resolve, 2100));
             let selectedCurrency = 'EUR';
             try {
                 await initDb();
@@ -219,7 +222,6 @@ export default function HomeScreen() {
                 txnsRef.current = allTxns || [];
                 if (!allTxns || allTxns.length === 0) {
                     setPortfolio([]);
-                    setBooting(false);
                     return;
                 }
 
@@ -227,7 +229,6 @@ export default function HomeScreen() {
                 const symbols = Object.keys(holdings).filter(s => (holdings[s] || 0) > 0.00000001);
                 if (symbols.length === 0) {
                     setPortfolio([]);
-                    setBooting(false);
                     return;
                 }
 
@@ -285,6 +286,7 @@ export default function HomeScreen() {
                     }
                 }
             } finally {
+                await minSplashTimer;
                 setBooting(false);
             }
         })();
