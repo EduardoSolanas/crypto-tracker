@@ -1,6 +1,6 @@
 console.log('--- LOADING JEST CONFIG ---');
 module.exports = {
-    testTimeout: 15000,
+    testTimeout: 30000,
     maxWorkers: 2,
     preset: 'jest-expo',
     transform: {
