@@ -1,4 +1,5 @@
 import 'react-native-gesture-handler/jestSetup';
+import { Dimensions } from 'react-native';
 
 jest.mock('react-native-reanimated', () => {
     const Reanimated = require('react-native-reanimated/mock');
@@ -9,8 +10,7 @@ jest.mock('react-native-reanimated', () => {
     return Reanimated;
 });
 
-// Mock Dimensions
-import { Dimensions } from 'react-native';
+// Mock Dimensions
 jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 375, height: 812 });
 
 jest.mock('expo-haptics', () => ({
