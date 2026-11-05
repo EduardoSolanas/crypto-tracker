@@ -1,22 +1,45 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { act, render } from '@testing-library/react-native';
 import StartupScreen, { STARTUP_POLYGONS } from '../StartupScreen';
 
-describe('StartupScreen polygon progress', () => {
-    it('lights more polygons as progress increases from 0 to 1', () => {
-        const { getByTestId, queryAllByTestId, rerender } = render(<StartupScreen progress={0.1} />);
+describe('StartupScreen fan animation', () => {
+    beforeEach(() => {
+        jest.useFakeTimers();
+    });
 
-        expect(getByTestId('startup-screen')).toBeTruthy();
-        const initialLit = queryAllByTestId(/^startup-polygon-lit-/).length;
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    const litCount = (screen) => screen.queryAllByTestId(/^startup-polygon-lit-/).length;
+
+    it('lights polygons progressively over time without snapping to full', () => {
+        const screen = render(<StartupScreen />);
+
+        expect(screen.getByTestId('startup-screen')).toBeTruthy();
+        const initialLit = litCount(screen);
         expect(initialLit).toBeGreaterThanOrEqual(1);
         expect(initialLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        rerender(<StartupScreen progress={0.5} />);
-        const midLit = queryAllByTestId(/^startup-polygon-lit-/).length;
-        expect(midLit).toBeGreaterThan(initialLit);
+        act(() => { jest.advanceTimersByTime(800); });
+        const earlyLit = litCount(screen);
+        expect(earlyLit).toBeGreaterThan(initialLit);
+        expect(earlyLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        rerender(<StartupScreen progress={1} />);
-        const fullLit = queryAllByTestId(/^startup-polygon-lit-/).length;
-        expect(fullLit).toBe(STARTUP_POLYGONS.length);
+        act(() => { jest.advanceTimersByTime(8000); });
+        expect(litCount(screen)).toBe(STARTUP_POLYGONS.length);
+    });
+
+    it('keeps animating at the same pace regardless of any progress prop', () => {
+        const screen = render(<StartupScreen progress={1} />);
+
+        const litNow = litCount(screen);
+        expect(litNow).toBeLessThan(STARTUP_POLYGONS.length);
+
+        act(() => { jest.advanceTimersByTime(160); });
+        screen.rerender(<StartupScreen progress={1} />);
+        const litAfterTwoTicks = litCount(screen);
+        expect(litAfterTwoTicks).toBeGreaterThan(litNow);
+        expect(litAfterTwoTicks).toBeLessThan(STARTUP_POLYGONS.length);
     });
 });

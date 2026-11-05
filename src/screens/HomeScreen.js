@@ -45,7 +45,6 @@ export default function HomeScreen() {
     }, [t]);
 
     const [booting, setBooting] = useState(true);
-    const [bootProgress, setBootProgress] = useState(0.05);
     const [loading, setLoading] = useState(false);
     const [currency, setCurrency] = useState('EUR');
     const [portfolio, setPortfolio] = useState(null);
@@ -207,24 +206,8 @@ export default function HomeScreen() {
         didBootstrapRef.current = true;
         (async () => {
             let selectedCurrency = 'EUR';
-            let isBootActive = true;
-            let pendingProgress = 0.05;
-            let progressFlushScheduled = false;
-            const reportBootProgress = (nextVal) => {
-                if (!isBootActive) return;
-                pendingProgress = Math.max(pendingProgress, nextVal);
-                if (progressFlushScheduled) return;
-                progressFlushScheduled = true;
-                queueMicrotask(() => {
-                    progressFlushScheduled = false;
-                    if (isBootActive) {
-                        setBootProgress(pendingProgress);
-                    }
-                });
-            };
             try {
                 await initDb();
-                reportBootProgress(0.15);
                 const [savedCurrency, allTxns] = await Promise.all([
                     getMeta('currency'),
                     getAllTransactions()
@@ -235,7 +218,6 @@ export default function HomeScreen() {
 
                 txnsRef.current = allTxns || [];
                 if (!allTxns || allTxns.length === 0) {
-                    isBootActive = false;
                     setPortfolio([]);
                     setBooting(false);
                     return;
@@ -244,13 +226,11 @@ export default function HomeScreen() {
                 const holdings = await getEffectiveHoldings();
                 const symbols = Object.keys(holdings).filter(s => (holdings[s] || 0) > 0.00000001);
                 if (symbols.length === 0) {
-                    isBootActive = false;
                     setPortfolio([]);
                     setBooting(false);
                     return;
                 }
 
-                reportBootProgress(0.25);
                 rangeCacheRef.current.clear();
                 historyRequestsRef.current.clear();
                 clearCandleCache();
@@ -258,22 +238,13 @@ export default function HomeScreen() {
                 const activeHoldings = {};
                 symbols.forEach(s => { activeHoldings[s] = holdings[s]; });
 
-                const totalApiSteps = 1 + symbols.length;
-                let completedApiSteps = 0;
-                const advanceApiProgress = () => {
-                    completedApiSteps += 1;
-                    reportBootProgress(0.25 + (completedApiSteps / totalApiSteps) * 0.65);
-                };
-
                 // Parallelize live price fetching and 1D candles pre-fetching for fast first load.
                 // Hold the splash screen until all API calls and graph building finish.
                 const [freshPortfolio] = await Promise.all([
-                    fetchPortfolioPrices(activeHoldings, selectedCurrency).finally(advanceApiProgress),
+                    fetchPortfolioPrices(activeHoldings, selectedCurrency),
                     Promise.all(
                         symbols.map(sym =>
-                            fetchCandles(sym, selectedCurrency, 'hour', 44, 1)
-                                .catch(() => [])
-                                .finally(advanceApiProgress)
+                            fetchCandles(sym, selectedCurrency, 'hour', 44, 1).catch(() => [])
                         )
                     )
                 ]);
@@ -314,7 +285,6 @@ export default function HomeScreen() {
                     }
                 }
             } finally {
-                isBootActive = false;
                 setBooting(false);
             }
         })();
@@ -467,7 +437,7 @@ export default function HomeScreen() {
     const hiddenCount = (portfolio?.length || 0) - (portfolio ? portfolio.filter(p => (p.value || 0) >= 10).length : 0);
 
     if (booting) {
-        return <StartupScreen progress={bootProgress} />;
+        return <StartupScreen />;
     }
 
     if (!portfolio || portfolio.length === 0) {

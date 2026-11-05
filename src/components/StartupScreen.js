@@ -89,26 +89,22 @@ function computeSwitchOnEnvelope(age, phase, index) {
     };
 }
 
-export default function StartupScreen({ progress = 0 }) {
+export default function StartupScreen() {
     const totalPolygons = STARTUP_POLYGONS.length;
-    const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
-    const targetFromProgress = Math.max(1, clampedProgress * totalPolygons);
 
     const [animState, setAnimState] = useState({ playhead: 1, tick: 0 });
 
     useEffect(() => {
-        const maxCreep = totalPolygons - 0.6;
         const timer = setInterval(() => {
-            setAnimState((prev) => {
-                const desired = Math.max(prev.playhead, targetFromProgress);
-                const nextPlayhead = desired < maxCreep ? Math.min(maxCreep, desired + 0.32) : desired;
-                return { playhead: nextPlayhead, tick: prev.tick + 1 };
-            });
+            setAnimState((prev) => ({
+                playhead: Math.min(totalPolygons + 1, prev.playhead + 0.32),
+                tick: prev.tick + 1,
+            }));
         }, 80);
         return () => clearInterval(timer);
-    }, [targetFromProgress, totalPolygons]);
+    }, [totalPolygons]);
 
-    const effectivePlayhead = Math.min(totalPolygons + 1, Math.max(animState.playhead, targetFromProgress));
+    const effectivePlayhead = animState.playhead;
     const litCount = Math.min(totalPolygons, Math.max(1, Math.ceil(effectivePlayhead)));
     const phase = animState.tick * 0.25;
 
