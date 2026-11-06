@@ -205,9 +205,6 @@ export default function HomeScreen() {
         if (didBootstrapRef.current) return;
         didBootstrapRef.current = true;
         (async () => {
-            const minSplashTimer = process.env.NODE_ENV === 'test'
-                ? Promise.resolve()
-                : new Promise((resolve) => setTimeout(resolve, 3900));
             let selectedCurrency = 'EUR';
             try {
                 await initDb();
@@ -286,7 +283,6 @@ export default function HomeScreen() {
                     }
                 }
             } finally {
-                await minSplashTimer;
                 setBooting(false);
             }
         })();
