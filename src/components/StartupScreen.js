@@ -1,20 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Image, StatusBar, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image, StatusBar, StyleSheet, View } from 'react-native';
 import { STARTUP_POLYGONS } from './startupPolygons';
 import OVERLAYS from './startupOverlays';
 
-const STEP_MS = 80;
+const STEP_MS = 175;
 
 export default function StartupScreen() {
     const totalPolygons = STARTUP_POLYGONS.length;
-    const dims = useWindowDimensions();
-    const frameStyle = [
-        styles.bgImage,
-        dims?.width > 0 && dims?.height > 0
-            ? { width: dims.width, height: dims.height }
-            : null,
-    ];
-
     const [litCount, setLitCount] = useState(1);
 
     useEffect(() => {
@@ -29,7 +21,7 @@ export default function StartupScreen() {
             if (next >= totalPolygons) {
                 clearInterval(timer);
             }
-        }, 50);
+        }, 45);
 
         return () => clearInterval(timer);
     }, [totalPolygons]);
@@ -41,11 +33,11 @@ export default function StartupScreen() {
             accessibilityLabel="CryptoTracker"
             accessibilityValue={{ min: 0, max: totalPolygons, now: litCount }}
         >
-            <StatusBar barStyle="light-content" backgroundColor="#070F1C" />
+            <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
             <Image
                 source={require('../../assets/images/splash-polygons-bg.png')}
                 fadeDuration={0}
-                style={frameStyle}
+                style={styles.bgImage}
                 resizeMode="stretch"
             />
             {STARTUP_POLYGONS.slice(0, litCount).map((poly, index) => (
@@ -54,7 +46,7 @@ export default function StartupScreen() {
                     testID={`startup-polygon-lit-${poly.id}`}
                     source={OVERLAYS[index]}
                     fadeDuration={0}
-                    style={frameStyle}
+                    style={styles.bgImage}
                     resizeMode="stretch"
                 />
             ))}

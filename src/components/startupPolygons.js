@@ -2,6 +2,7 @@
 // Consumed by StartupScreen.js and scripts/generate-startup-overlays.mjs.
 const V = {
     C_TL:  [0, 0],
+    C_TR:  [412, 0],
     T0:    [27, 0],
     T1:    [158, 0],
     T2:    [254, 0],
@@ -24,20 +25,23 @@ const V = {
     V5:    [73, 662.5],
     L6:    [0, 703.5],
     V6:    [180, 730],
-    V7:    [410, 765.5],
+    V7:    [412, 765.5],
     L7:    [0, 903],
     B0:    [11, 915],
     C_BL:  [0, 915],
+    C_BR:  [412, 915],
 };
 
 export const STARTUP_POLYGONS = [
     { id: 'P20', side: 'left',  pts: ['L7', 'V5', 'V6', 'B0', 'C_BL'] },
-    { id: 'P18', side: 'right', pts: ['V4', 'V7', 'V6'] },
+    { id: 'P21', side: 'right', pts: ['B0', 'V6', 'V7', 'C_BR'] },
     { id: 'P19', side: 'left',  pts: ['L6', 'V5', 'L7'] },
-    { id: 'P17', side: 'right', pts: ['V3', 'V4', 'V6'] },
+    { id: 'P18', side: 'right', pts: ['V4', 'V7', 'V6'] },
     { id: 'P15', side: 'left',  pts: ['L5', 'V5', 'L6'] },
-    { id: 'P16', side: 'right', pts: ['V3', 'V6', 'V5'] },
+    { id: 'P22', side: 'right', pts: ['V4', 'R2', 'V7'] },
     { id: 'P14', side: 'left',  pts: ['L4', 'V5', 'L5'] },
+    { id: 'P17', side: 'right', pts: ['V3', 'V4', 'V6'] },
+    { id: 'P16', side: 'left',  pts: ['V3', 'V6', 'V5'] },
     { id: 'P12', side: 'right', pts: ['V2', 'R1', 'R2', 'V4'] },
     { id: 'P13', side: 'left',  pts: ['L3', 'V3', 'V5', 'L4'] },
     { id: 'P11', side: 'right', pts: ['V2', 'V4', 'V3'] },
@@ -51,6 +55,7 @@ export const STARTUP_POLYGONS = [
     { id: 'P6',  side: 'right', pts: ['V0', 'V2', 'V1'] },
     { id: 'P2',  side: 'left',  pts: ['T0', 'T1', 'V0'] },
     { id: 'P5',  side: 'right', pts: ['T1', 'T2', 'V2', 'V0'] },
+    { id: 'P23', side: 'right', pts: ['T3', 'C_TR', 'R_TOP'] },
 ];
 
 export { V };

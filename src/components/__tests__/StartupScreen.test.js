@@ -27,7 +27,7 @@ describe('StartupScreen fan animation', () => {
         expect(earlyLit).toBeGreaterThan(initialLit);
         expect(earlyLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        await settle(1800);
+        await settle(3600);
         expect(litCount(screen)).toBe(STARTUP_POLYGONS.length);
     }, 20000);
 });

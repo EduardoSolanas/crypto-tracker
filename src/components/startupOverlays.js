@@ -2,12 +2,14 @@
 // Index-aligned with STARTUP_POLYGONS: one full-canvas lit overlay per polygon.
 export default [
   require('../../assets/images/startup-overlays/lit-P20.png'),
-  require('../../assets/images/startup-overlays/lit-P18.png'),
+  require('../../assets/images/startup-overlays/lit-P21.png'),
   require('../../assets/images/startup-overlays/lit-P19.png'),
-  require('../../assets/images/startup-overlays/lit-P17.png'),
+  require('../../assets/images/startup-overlays/lit-P18.png'),
   require('../../assets/images/startup-overlays/lit-P15.png'),
-  require('../../assets/images/startup-overlays/lit-P16.png'),
+  require('../../assets/images/startup-overlays/lit-P22.png'),
   require('../../assets/images/startup-overlays/lit-P14.png'),
+  require('../../assets/images/startup-overlays/lit-P17.png'),
+  require('../../assets/images/startup-overlays/lit-P16.png'),
   require('../../assets/images/startup-overlays/lit-P12.png'),
   require('../../assets/images/startup-overlays/lit-P13.png'),
   require('../../assets/images/startup-overlays/lit-P11.png'),
@@ -21,4 +23,5 @@ export default [
   require('../../assets/images/startup-overlays/lit-P6.png'),
   require('../../assets/images/startup-overlays/lit-P2.png'),
   require('../../assets/images/startup-overlays/lit-P5.png'),
+  require('../../assets/images/startup-overlays/lit-P23.png'),
 ];

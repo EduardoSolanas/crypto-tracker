@@ -207,7 +207,7 @@ export default function HomeScreen() {
         (async () => {
             const minSplashTimer = process.env.NODE_ENV === 'test'
                 ? Promise.resolve()
-                : new Promise((resolve) => setTimeout(resolve, 2100));
+                : new Promise((resolve) => setTimeout(resolve, 3900));
             let selectedCurrency = 'EUR';
             try {
                 await initDb();
