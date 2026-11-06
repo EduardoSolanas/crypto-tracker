@@ -22,12 +22,12 @@ describe('StartupScreen fan animation', () => {
         expect(initialLit).toBeGreaterThanOrEqual(1);
         expect(initialLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        await settle(450);
+        await settle(600);
         const earlyLit = litCount(screen);
         expect(earlyLit).toBeGreaterThan(initialLit);
         expect(earlyLit).toBeLessThan(STARTUP_POLYGONS.length);
 
-        await settle(4600);
+        await settle(9600);
         expect(litCount(screen)).toBe(STARTUP_POLYGONS.length);
     }, 20000);
 });

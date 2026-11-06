@@ -3,7 +3,7 @@ import { Image, StatusBar, StyleSheet, View } from 'react-native';
 import { STARTUP_POLYGONS } from './startupPolygons';
 import OVERLAYS from './startupOverlays';
 
-const STEP_MS = 220;
+const STEP_MS = 450;
 
 export default function StartupScreen() {
     const totalPolygons = STARTUP_POLYGONS.length;
