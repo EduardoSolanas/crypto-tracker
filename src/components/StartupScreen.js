@@ -64,5 +64,13 @@ export default function StartupScreen() {
 
 const styles = StyleSheet.create({
     screen: { flex: 1, backgroundColor: '#070F1C' },
-    bgImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+    bgImage: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: '100%',
+    },
 });
