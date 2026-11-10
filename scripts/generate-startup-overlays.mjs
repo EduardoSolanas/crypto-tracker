@@ -21,17 +21,17 @@ const OUT_DIR = path.join('assets', 'images', 'startup-overlays');
 
 const GRADS = `
   <defs>
-    <linearGradient id="leftGrad" x1="0%" y1="25%" x2="100%" y2="75%">
-      <stop offset="0%" stop-color="#E0F2FE" stop-opacity="0.78"/>
-      <stop offset="38%" stop-color="#38BDF8" stop-opacity="0.62"/>
-      <stop offset="75%" stop-color="#0284C7" stop-opacity="0.46"/>
-      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.34"/>
+    <linearGradient id="leftGrad" x1="0%" y1="15%" x2="100%" y2="85%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.44"/>
+      <stop offset="28%" stop-color="#FFFFFF" stop-opacity="0.26"/>
+      <stop offset="68%" stop-color="#F8FAFC" stop-opacity="0.11"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.22"/>
     </linearGradient>
-    <linearGradient id="rightGrad" x1="100%" y1="25%" x2="0%" y2="75%">
-      <stop offset="0%" stop-color="#E0F2FE" stop-opacity="0.78"/>
-      <stop offset="38%" stop-color="#38BDF8" stop-opacity="0.62"/>
-      <stop offset="75%" stop-color="#0284C7" stop-opacity="0.46"/>
-      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.34"/>
+    <linearGradient id="rightGrad" x1="100%" y1="15%" x2="0%" y2="85%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.44"/>
+      <stop offset="28%" stop-color="#FFFFFF" stop-opacity="0.26"/>
+      <stop offset="68%" stop-color="#F8FAFC" stop-opacity="0.11"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.22"/>
     </linearGradient>
   </defs>`;
 
@@ -45,8 +45,8 @@ for (const poly of POLYGONS) {
   const svg =
     `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" ` +
     `xmlns="http://www.w3.org/2000/svg">${GRADS}` +
-    `<polygon points="${points}" fill="${grad}" stroke="#38BDF8" stroke-opacity="0.55" stroke-width="3.2" stroke-linejoin="round"/>` +
-    `<polygon points="${points}" fill="none" stroke="#E0F2FE" stroke-opacity="0.92" stroke-width="1.3" stroke-linejoin="round"/>` +
+    `<polygon points="${points}" fill="${grad}" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="3.6" stroke-linejoin="round"/>` +
+    `<polygon points="${points}" fill="none" stroke="#FFFFFF" stroke-opacity="0.82" stroke-width="1.2" stroke-linejoin="round"/>` +
     `</svg>`;
   const png = new Resvg(svg, { fitTo: { mode: 'width', value: WIDTH * SCALE } })
     .render()
